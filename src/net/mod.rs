@@ -8,7 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use laminar::{Socket, SocketEvent};
+use bincode::Options;
+use laminar::{Config, Socket, SocketEvent};
 
 mod stun;
 mod transfer;
@@ -20,9 +21,23 @@ const CHUNK_SIZE: usize = 1024;
 const PUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 const PUNCH_INTERVAL: Duration = Duration::from_millis(200);
 
+fn log_transport_config(config: &Config, evt_tx: &Sender<NetEvent>) {
+    let heartbeat = config
+        .heartbeat_interval
+        .map(|interval| format!("{interval:?}"))
+        .unwrap_or_else(|| "desabilitado".to_string());
+    let _ = evt_tx.send(NetEvent::Log(format!(
+        "controle de trafego: confiavel/ordenado no canal {CHANNEL_ID}, max_packets_in_flight={}, fragment_size={}, max_packet_size={}, heartbeat={heartbeat}",
+        config.max_packets_in_flight, config.fragment_size, config.max_packet_size
+    )));
+    let _ = evt_tx.send(NetEvent::Log(format!(
+        "dados de arquivo: chunks de {CHUNK_SIZE} bytes com etiquetagem interna do laminar"
+    )));
+}
+
 /// Mensagens enviadas pela camada de rede para trafegar os arquivos.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-enum WireMessage {
+pub(crate) enum WireMessage {
     Hello {
         version: u8,
     },
@@ -44,6 +59,20 @@ enum WireMessage {
     FileDone {
         file_id: u64,
     },
+}
+
+fn bincode_options() -> impl Options {
+    // Enforce a fixed width encoding to avoid any platform-specific differences when
+    // serializing/deserializing `WireMessage` variants.
+    bincode::DefaultOptions::new().with_fixint_encoding()
+}
+
+pub(crate) fn serialize_message(message: &WireMessage) -> bincode::Result<Vec<u8>> {
+    bincode_options().serialize(message)
+}
+
+fn deserialize_message(bytes: &[u8]) -> bincode::Result<WireMessage> {
+    bincode_options().deserialize(bytes)
 }
 
 /// Comandos enviados pela UI para a thread de rede.
@@ -152,7 +181,12 @@ fn run_network(
         }
     }
 
-    let mut socket = match Socket::bind(bind_addr) {
+    let config = Config {
+        heartbeat_interval: Some(Duration::from_secs(2)),
+        ..Config::default()
+    };
+    log_transport_config(&config, &evt_tx);
+    let mut socket = match Socket::bind_with_config(bind_addr, config) {
         Ok(socket) => socket,
         Err(err) => {
             let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir socket {err}")));
@@ -233,7 +267,7 @@ fn run_network(
         while let Some(event) = socket.recv() {
             if let SocketEvent::Packet(packet) = event {
                 let from = packet.addr();
-                match bincode::deserialize::<WireMessage>(packet.payload()) {
+                match deserialize_message(packet.payload()) {
                     Ok(message) => {
                         let new_peer = handle_incoming_message(
                             &mut socket,
