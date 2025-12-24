@@ -3,7 +3,8 @@ mod ui;
 
 use std::net::SocketAddr;
 
-const DEFAULT_BIND: &str = "[::]:5000";
+const DEFAULT_BIND_IPV6: &str = "[::]:5000";
+const DEFAULT_BIND_IPV4: &str = "0.0.0.0:5000";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (bind_addr, peer_addr) = parse_args();
@@ -16,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _ = net_tx.send(net::NetCommand::Shutdown);
     let _ = net_handle.join();
-    
+
     if let Err(err) = run_result {
         eprintln!("error: {err}");
     }
@@ -25,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn parse_args() -> (SocketAddr, Option<SocketAddr>) {
-    let mut bind_addr = DEFAULT_BIND.parse().unwrap_or_else(|_| "[::]:5000".parse().unwrap());
+    let mut bind_addr = default_bind_addr();
     let mut peer_addr = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -48,4 +49,13 @@ fn parse_args() -> (SocketAddr, Option<SocketAddr>) {
         }
     }
     (bind_addr, peer_addr)
+}
+
+fn default_bind_addr() -> SocketAddr {
+    std::env::var("PASTA_P2P_BIND")
+        .ok()
+        .and_then(|addr| addr.parse().ok())
+        .or_else(|| DEFAULT_BIND_IPV6.parse().ok())
+        .or_else(|| DEFAULT_BIND_IPV4.parse().ok())
+        .unwrap_or_else(|| "0.0.0.0:5000".parse().expect("fallback de bind valido"))
 }

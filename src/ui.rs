@@ -1,6 +1,6 @@
 use std::{
     io,
-    net::{IpAddr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::mpsc::{Receiver, Sender},
     time::Duration,
@@ -13,16 +13,16 @@ use crossterm::{
         MouseEvent, MouseEventKind,
     },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use get_if_addrs::{get_if_addrs, IfAddr};
+use get_if_addrs::{IfAddr, get_if_addrs};
 use ratatui::{
+    Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, Paragraph},
-    Frame, Terminal,
 };
 
 use crate::net::{NetCommand, NetEvent};
@@ -146,7 +146,7 @@ impl Theme {
             border: Color::Rgb(45, 52, 65),
             text: Color::Rgb(230, 233, 240),
             muted: Color::Rgb(150, 158, 172),
-            accent: Color::Rgb(99, 179, 237),  // azul/ciano elegante
+            accent: Color::Rgb(99, 179, 237), // azul/ciano elegante
             info: Color::Rgb(130, 170, 255),
             ok: Color::Rgb(120, 210, 160),
             warn: Color::Rgb(240, 200, 120),
@@ -161,7 +161,7 @@ pub struct AppState {
     peer_input: String,
     peer_focus: bool,
     connect_status: ConnectStatus,
-    local_ipv6: Option<Ipv6Addr>,
+    local_ip: Option<IpAddr>,
     public_endpoint: Option<SocketAddr>,
     stun_status: Option<String>,
     selected: Vec<OutgoingEntry>,
@@ -180,17 +180,14 @@ impl AppState {
             Some(addr) => (None, addr.to_string(), ConnectStatus::Connecting(addr)),
             None => (None, String::new(), ConnectStatus::Idle),
         };
-        let local_ipv6 = match bind_addr.ip() {
-            IpAddr::V6(addr) if !addr.is_unspecified() => Some(addr),
-            _ => detect_local_ipv6(),
-        };
+        let local_ip = detect_local_ip(bind_addr.ip());
         Self {
             bind_addr,
             peer_addr,
             peer_input,
             peer_focus: false,
             connect_status,
-            local_ipv6,
+            local_ip,
             public_endpoint: None,
             stun_status: None,
             selected: Vec::new(),
@@ -221,9 +218,7 @@ pub fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     Terminal::new(backend)
 }
 
-pub fn restore_terminal(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-) -> io::Result<()> {
+pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -324,7 +319,11 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
         NetEvent::SessionDir(path) => {
             app.push_log(format!("diretorio da sessao {}", path.display()));
         }
-        NetEvent::SendStarted { file_id, path, size } => {
+        NetEvent::SendStarted {
+            file_id,
+            path,
+            size,
+        } => {
             if let Some(entry) = app.selected.iter_mut().find(|entry| entry.path == path) {
                 entry.file_id = Some(file_id);
                 entry.size = Some(size);
@@ -359,7 +358,11 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
             }
             app.push_log(format!("cancelado {}", path.display()));
         }
-        NetEvent::ReceiveStarted { file_id, path, size } => {
+        NetEvent::ReceiveStarted {
+            file_id,
+            path,
+            size,
+        } => {
             app.received.push(IncomingEntry {
                 path,
                 file_id,
@@ -373,7 +376,11 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
             bytes_received,
             size,
         } => {
-            if let Some(entry) = app.received.iter_mut().find(|entry| entry.file_id == file_id) {
+            if let Some(entry) = app
+                .received
+                .iter_mut()
+                .find(|entry| entry.file_id == file_id)
+            {
                 entry.size = size;
                 entry.received_bytes = bytes_received.min(size);
                 if matches!(entry.status, IncomingStatus::Done) {
@@ -382,7 +389,11 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
             }
         }
         NetEvent::ReceiveCanceled { file_id, path } => {
-            if let Some(entry) = app.received.iter_mut().find(|entry| entry.file_id == file_id) {
+            if let Some(entry) = app
+                .received
+                .iter_mut()
+                .find(|entry| entry.file_id == file_id)
+            {
                 entry.status = IncomingStatus::Canceled;
             }
             app.push_log(format!("recebimento cancelado {}", path.display()));
@@ -436,9 +447,9 @@ fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &Sender<Net
 fn handle_button_action(app: &mut AppState, action: ButtonAction, net_tx: &Sender<NetCommand>) {
     match action {
         ButtonAction::ConnectPeer => start_connect(app, net_tx),
-        ButtonAction::CopyLocalIp => copy_local_ipv6(app),
+        ButtonAction::CopyLocalIp => copy_local_ip(app),
         ButtonAction::CopyPublicEndpoint => copy_public_endpoint(app),
-        ButtonAction::PastePeerIp => paste_peer_ipv6(app),
+        ButtonAction::PastePeerIp => paste_peer_ip(app),
         ButtonAction::AddFiles => {
             if let Some(files) = pick_files_dialog() {
                 for path in files {
@@ -500,15 +511,18 @@ fn handle_peer_input_key(app: &mut AppState, code: KeyCode, net_tx: &Sender<NetC
     }
 }
 
-fn copy_local_ipv6(app: &mut AppState) {
-    let addr = match app.local_ipv6 {
+fn copy_local_ip(app: &mut AppState) {
+    let addr = match app.local_ip {
         Some(addr) => addr,
         None => {
-            app.push_log("ipv6 local nao encontrado");
+            app.push_log("ip local nao encontrado");
             return;
         }
     };
-    let text = format!("[{}]:{}", addr, app.bind_addr.port());
+    let text = match addr {
+        IpAddr::V4(v4) => format!("{}:{}", v4, app.bind_addr.port()),
+        IpAddr::V6(v6) => format!("[{}]:{}", v6, app.bind_addr.port()),
+    };
     match Clipboard::new() {
         Ok(mut clipboard) => match clipboard.set_text(text.clone()) {
             Ok(()) => app.push_log(format!("copiado {text}")),
@@ -536,7 +550,7 @@ fn copy_public_endpoint(app: &mut AppState) {
     }
 }
 
-fn paste_peer_ipv6(app: &mut AppState) {
+fn paste_peer_ip(app: &mut AppState) {
     let mut clipboard = match Clipboard::new() {
         Ok(clipboard) => clipboard,
         Err(err) => {
@@ -557,7 +571,7 @@ fn paste_peer_ipv6(app: &mut AppState) {
             } else {
                 app.peer_input = filtered;
                 app.peer_focus = true;
-                app.push_log("ipv6 colado");
+                app.push_log("ip colado");
             }
         }
         Err(err) => app.push_log(format!("erro no clipboard {err}")),
@@ -613,9 +627,7 @@ fn root_bg(theme: Theme) -> Block<'static> {
 }
 
 fn title_style(theme: Theme) -> Style {
-    Style::default()
-        .fg(theme.text)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(theme.text).add_modifier(Modifier::BOLD)
 }
 
 fn block_with_title(theme: Theme, title: &str) -> Block<'_> {
@@ -689,7 +701,8 @@ fn log_style(theme: Theme, line: &str) -> Style {
         Style::default().fg(theme.warn)
     } else if lower.contains("timeout") || lower.contains("esgotado") {
         Style::default().fg(theme.warn)
-    } else if lower.contains("conectado") || lower.contains("enviado") || lower.contains("recebido") {
+    } else if lower.contains("conectado") || lower.contains("enviado") || lower.contains("recebido")
+    {
         Style::default().fg(theme.ok)
     } else if lower.contains("conectando") {
         Style::default().fg(theme.warn)
@@ -902,7 +915,7 @@ fn render_connection_panel(
         ])
         .split(rows[0]);
 
-    // Linha 2: meu ipv6 + copiar
+    // Linha 2: meu ip + copiar
     let row_mid = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(20), Constraint::Length(12)])
@@ -918,13 +931,13 @@ fn render_connection_panel(
     let row_status = rows[3];
 
     // Input
-    let input_title = if app.peer_focus {
-        "ipv6 do parceiro"
-    } else {
-        "ipv6 do parceiro"
-    };
+    let input_title = "ip do parceiro";
 
-    let placeholder = "ex: [2001:db8::1]:5000";
+    let placeholder = if app.bind_addr.is_ipv4() {
+        "ex: 192.0.2.10:5000"
+    } else {
+        "ex: [2001:db8::1]:5000"
+    };
     let input_text = if app.peer_input.is_empty() {
         placeholder.to_string()
     } else {
@@ -944,9 +957,12 @@ fn render_connection_panel(
             .add_modifier(Modifier::BOLD);
     }
 
-    let input_block = block_with_title(theme, input_title).border_style(Style::default().fg(
-        if app.peer_focus { theme.accent } else { theme.border },
-    ));
+    let input_block =
+        block_with_title(theme, input_title).border_style(Style::default().fg(if app.peer_focus {
+            theme.accent
+        } else {
+            theme.border
+        }));
 
     let input = Paragraph::new(input_text)
         .style(input_style)
@@ -1001,15 +1017,18 @@ fn render_connection_panel(
 
     frame.render_widget(connect_widget, connect_button.area);
 
-    // Meu IPv6
+    // Meu IP
     let local_text = app
-        .local_ipv6
+        .local_ip
         .map(|addr| addr.to_string())
         .unwrap_or_else(|| "nao encontrado".to_string());
 
     let local_line = Line::from(vec![
-        Span::styled("meu ipv6: ", Style::default().fg(theme.muted)),
-        Span::styled(local_text, Style::default().fg(theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled("meu ip: ", Style::default().fg(theme.muted)),
+        Span::styled(
+            local_text,
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
     ]);
 
     let local_panel = Paragraph::new(local_line).block(block_with_title(theme, "local"));
@@ -1026,7 +1045,7 @@ fn render_connection_panel(
         .map(|(x, y)| point_in_rect(x, y, copy_button.area))
         .unwrap_or(false);
 
-    let copy_enabled = app.local_ipv6.is_some();
+    let copy_enabled = app.local_ip.is_some();
 
     let copy_style = button_style(theme, theme.accent, copy_hover, copy_enabled);
 
@@ -1046,7 +1065,10 @@ fn render_connection_panel(
 
     let public_line = Line::from(vec![
         Span::styled("publico: ", Style::default().fg(theme.muted)),
-        Span::styled(public_text, Style::default().fg(theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            public_text,
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
     ]);
 
     let public_panel = Paragraph::new(public_line).block(block_with_title(theme, "publico"));
@@ -1093,7 +1115,12 @@ fn render_connection_panel(
     let status = Paragraph::new(status_line).block(block_with_title(theme, "status"));
     frame.render_widget(status, row_status);
 
-    let buttons = vec![connect_button, paste_button, copy_button, copy_public_button];
+    let buttons = vec![
+        connect_button,
+        paste_button,
+        copy_button,
+        copy_public_button,
+    ];
     (row_top[0], buttons)
 }
 
@@ -1193,31 +1220,46 @@ fn pick_files_dialog() -> Option<Vec<PathBuf>> {
     files
 }
 
-fn detect_local_ipv6() -> Option<Ipv6Addr> {
-    let mut global = None;
-    let mut unique_local = None;
+fn detect_local_ip(preferred: IpAddr) -> Option<IpAddr> {
+    let mut best_v4 = None;
+    let mut best_v6_global = None;
+    let mut best_v6_local = None;
 
     let interfaces = get_if_addrs().ok()?;
     for iface in interfaces {
-        if let IfAddr::V6(v6) = iface.addr {
-            let addr = v6.ip;
-            if addr.is_loopback() || addr.is_multicast() || addr.is_unspecified() {
-                continue;
-            }
-            if addr.is_unicast_link_local() {
-                continue;
-            }
-            if addr.is_unique_local() {
-                if unique_local.is_none() {
-                    unique_local = Some(addr);
+        match iface.addr {
+            IfAddr::V4(v4) => {
+                let addr = v4.ip;
+                if addr.is_loopback() || addr.is_link_local() || addr.is_broadcast() {
+                    continue;
                 }
-                continue;
+                if best_v4.is_none() {
+                    best_v4 = Some(IpAddr::V4(addr));
+                }
             }
-            if global.is_none() {
-                global = Some(addr);
+            IfAddr::V6(v6) => {
+                let addr = v6.ip;
+                if addr.is_loopback() || addr.is_multicast() || addr.is_unspecified() {
+                    continue;
+                }
+                if addr.is_unicast_link_local() {
+                    continue;
+                }
+                if addr.is_unique_local() {
+                    if best_v6_local.is_none() {
+                        best_v6_local = Some(IpAddr::V6(addr));
+                    }
+                    continue;
+                }
+                if best_v6_global.is_none() {
+                    best_v6_global = Some(IpAddr::V6(addr));
+                }
             }
         }
     }
 
-    global.or(unique_local)
+    match preferred {
+        IpAddr::V4(_) => best_v4.or(best_v6_global).or(best_v6_local),
+        IpAddr::V6(_) => best_v6_global.or(best_v6_local).or(best_v4),
+    }
 }
