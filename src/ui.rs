@@ -1,5 +1,6 @@
 use std::{
-    io,
+    fs::OpenOptions,
+    io::{self, Write},
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::mpsc::{Receiver, Sender},
@@ -30,6 +31,7 @@ use crate::net::{NetCommand, NetEvent};
 const MAX_PEER_INPUT: usize = 120;
 const MAX_LOGS: usize = 200;
 const PROGRESS_BAR_WIDTH: usize = 16;
+const LOG_FILE_PATH: &str = "p2p_logs.txt";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum IpMode {
@@ -206,11 +208,21 @@ impl AppState {
             None => (None, String::new(), ConnectStatus::Idle),
         };
         let local_ip = detect_local_ip(bind_addr.ip());
+        let mode = if bind_addr.is_ipv4() {
+            IpMode::Ipv4
+        } else {
+            IpMode::Ipv6
+        };
+        let mode = mode.fallback(
+            matches!(local_ip, Some(IpAddr::V4(_))),
+            matches!(local_ip, Some(IpAddr::V6(_))),
+        );
         Self {
             bind_addr,
             peer_addr,
             peer_input,
             peer_focus: false,
+            mode,
             connect_status,
             local_ip,
             public_endpoint: None,
@@ -227,17 +239,22 @@ impl AppState {
     }
 
     fn push_log(&mut self, message: impl Into<String>) {
-        self.logs.push(message.into());
+        let message = message.into();
+        self.logs.push(message.clone());
         if self.logs.len() > MAX_LOGS {
             let excess = self.logs.len() - MAX_LOGS;
             self.logs.drain(0..excess);
+        }
+
+        if let Err(err) = append_log_to_file(&message) {
+            eprintln!("failed to write log file: {err}");
         }
     }
 
     fn mode_supported(&self, mode: IpMode) -> bool {
         match mode {
-            IpMode::Ipv4 => self.local_v4.is_some(),
-            IpMode::Ipv6 => self.local_v6.is_some(),
+            IpMode::Ipv4 => matches!(self.local_ip, Some(IpAddr::V4(_))),
+            IpMode::Ipv6 => matches!(self.local_ip, Some(IpAddr::V6(_))),
         }
     }
 
@@ -249,17 +266,20 @@ impl AppState {
     }
 
     fn current_local_ip(&self) -> Option<IpAddr> {
-        match self.mode {
-            IpMode::Ipv4 => self.local_v4,
-            IpMode::Ipv6 => self.local_v6,
-        }
+        self.local_ip.and_then(|addr| match (self.mode, addr) {
+            (IpMode::Ipv4, IpAddr::V4(_)) => Some(addr),
+            (IpMode::Ipv6, IpAddr::V6(_)) => Some(addr),
+            _ => None,
+        })
     }
 
     fn current_public_endpoint(&self) -> Option<SocketAddr> {
-        match self.mode {
-            IpMode::Ipv4 => self.public_v4,
-            IpMode::Ipv6 => self.public_v6,
-        }
+        self.public_endpoint
+            .and_then(|endpoint| match (self.mode, endpoint) {
+                (IpMode::Ipv4, SocketAddr::V4(_)) => Some(endpoint),
+                (IpMode::Ipv6, SocketAddr::V6(_)) => Some(endpoint),
+                _ => None,
+            })
     }
 }
 
@@ -341,11 +361,7 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
             app.push_log(message);
         }
         NetEvent::PublicEndpoint(endpoint) => {
-            if endpoint.is_ipv4() {
-                app.public_v4 = Some(endpoint);
-            } else {
-                app.public_v6 = Some(endpoint);
-            }
+            app.public_endpoint = Some(endpoint);
             app.stun_status = None;
             app.push_log(format!("endpoint publico {endpoint}"));
         }
@@ -504,6 +520,8 @@ fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &Sender<Net
 fn handle_button_action(app: &mut AppState, action: ButtonAction, net_tx: &Sender<NetCommand>) {
     match action {
         ButtonAction::ConnectPeer => start_connect(app, net_tx),
+        ButtonAction::SelectIpv4 => app.select_mode(IpMode::Ipv4),
+        ButtonAction::SelectIpv6 => app.select_mode(IpMode::Ipv6),
         ButtonAction::CopyLocalIp => copy_local_ip(app),
         ButtonAction::CopyPublicEndpoint => copy_public_endpoint(app),
         ButtonAction::PastePeerIp => paste_peer_ip(app),
@@ -569,7 +587,7 @@ fn handle_peer_input_key(app: &mut AppState, code: KeyCode, net_tx: &Sender<NetC
 }
 
 fn copy_local_ip(app: &mut AppState) {
-    let addr = match app.local_ip {
+    let addr = match app.current_local_ip() {
         Some(addr) => addr,
         None => {
             app.push_log("ip local nao encontrado");
@@ -1150,7 +1168,7 @@ fn render_connection_panel(
 
     // Meu IP
     let local_text = app
-        .local_ip
+        .current_local_ip()
         .map(|addr| addr.to_string())
         .unwrap_or_else(|| "nao encontrado".to_string());
 
@@ -1176,7 +1194,7 @@ fn render_connection_panel(
         .map(|(x, y)| point_in_rect(x, y, copy_button.area))
         .unwrap_or(false);
 
-    let copy_enabled = app.local_ip.is_some();
+    let copy_enabled = app.current_local_ip().is_some();
 
     let copy_style = button_style(theme, theme.accent, copy_hover, copy_enabled);
 
@@ -1225,7 +1243,7 @@ fn render_connection_panel(
         .block(subtle_block(theme));
 
     frame.render_widget(copy_public_widget, copy_public_button.area);
-    header_buttons.push(copy_public_button);
+    header_buttons.push(copy_public_button.clone());
 
     // Status (chips)
     let peer_text = app
@@ -1354,6 +1372,14 @@ fn pick_files_dialog() -> Option<Vec<PathBuf>> {
 }
 
 fn detect_local_ip(preferred: IpAddr) -> Option<IpAddr> {
+    let interfaces = match get_if_addrs() {
+        Ok(interfaces) => interfaces,
+        Err(err) => {
+            eprintln!("failed to list interfaces: {err}");
+            return None;
+        }
+    };
+
     let mut best_v4 = None;
     let mut best_v6_global = None;
     let mut best_v6_local = None;
@@ -1394,4 +1420,12 @@ fn detect_local_ip(preferred: IpAddr) -> Option<IpAddr> {
         IpAddr::V4(_) => best_v4.or(best_v6_global).or(best_v6_local),
         IpAddr::V6(_) => best_v6_global.or(best_v6_local).or(best_v4),
     }
+}
+
+fn append_log_to_file(message: &str) -> io::Result<()> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(LOG_FILE_PATH)?;
+    writeln!(file, "{message}")
 }
