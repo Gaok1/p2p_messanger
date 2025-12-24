@@ -12,7 +12,7 @@ use std::{
 use chrono::Local;
 use laminar::{Packet, Socket};
 
-use super::{NetCommand, NetEvent, WireMessage};
+use super::{NetCommand, NetEvent, WireMessage, serialize_message};
 
 /// Representa um arquivo que está chegando do par.
 pub(crate) struct IncomingFile {
@@ -176,7 +176,7 @@ pub(crate) fn handle_send_punch(
     nonce: u64,
     evt_tx: &Sender<NetEvent>,
 ) {
-    match bincode::serialize(&WireMessage::Punch { nonce }) {
+    match serialize_message(&WireMessage::Punch { nonce }) {
         Ok(payload) => {
             if let Err(err) = socket.send(Packet::unreliable(peer, payload)) {
                 let _ = evt_tx.send(NetEvent::Log(format!("erro ao enviar punch {err}")));
@@ -196,7 +196,7 @@ pub(crate) fn send_message(
     evt_tx: &Sender<NetEvent>,
     channel_id: u8,
 ) {
-    match bincode::serialize(message) {
+    match serialize_message(message) {
         Ok(payload) => {
             if let Err(err) = socket.send(Packet::reliable_ordered(peer, payload, Some(channel_id)))
             {
