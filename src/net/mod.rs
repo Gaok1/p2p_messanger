@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::SocketAddr,
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
     thread,
@@ -139,21 +139,17 @@ fn run_network(
     cmd_rx: Receiver<NetCommand>,
     evt_tx: Sender<NetEvent>,
 ) {
-    probe_stun_for(bind_addr, &evt_tx);
-    let alt_stun = if bind_addr.is_ipv4() {
-        Some(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            bind_addr.port(),
-        ))
-    } else {
-        Some(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            bind_addr.port(),
-        ))
-    };
-
-    if let Some(addr) = alt_stun {
-        probe_stun_for(addr, &evt_tx);
+    match stun::detect_public_endpoint(bind_addr) {
+        Ok(Some(endpoint)) => {
+            let _ = evt_tx.send(NetEvent::PublicEndpoint(endpoint));
+            let _ = evt_tx.send(NetEvent::Log(format!("endpoint publico {endpoint}")));
+        }
+        Ok(None) => {
+            let _ = evt_tx.send(NetEvent::Log("stun indisponivel".to_string()));
+        }
+        Err(err) => {
+            let _ = evt_tx.send(NetEvent::Log(format!("stun erro {err}")));
+        }
     }
 
     let mut socket = match Socket::bind(bind_addr) {
@@ -268,21 +264,6 @@ fn run_network(
 
         socket.manual_poll(Instant::now());
         thread::sleep(Duration::from_millis(10));
-    }
-}
-
-fn probe_stun_for(bind_addr: SocketAddr, evt_tx: &Sender<NetEvent>) {
-    match stun::detect_public_endpoint(bind_addr) {
-        Ok(Some(endpoint)) => {
-            let _ = evt_tx.send(NetEvent::PublicEndpoint(endpoint));
-            let _ = evt_tx.send(NetEvent::Log(format!("endpoint publico {endpoint}")));
-        }
-        Ok(None) => {
-            let _ = evt_tx.send(NetEvent::Log("stun indisponivel".to_string()));
-        }
-        Err(err) => {
-            let _ = evt_tx.send(NetEvent::Log(format!("stun erro {err}")));
-        }
     }
 }
 

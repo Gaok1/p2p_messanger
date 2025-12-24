@@ -186,10 +186,8 @@ pub struct AppState {
     peer_focus: bool,
     mode: IpMode,
     connect_status: ConnectStatus,
-    local_v4: Option<IpAddr>,
-    local_v6: Option<IpAddr>,
-    public_v4: Option<SocketAddr>,
-    public_v6: Option<SocketAddr>,
+    local_ip: Option<IpAddr>,
+    public_endpoint: Option<SocketAddr>,
     stun_status: Option<String>,
     selected: Vec<OutgoingEntry>,
     received: Vec<IncomingEntry>,
@@ -207,24 +205,15 @@ impl AppState {
             Some(addr) => (None, addr.to_string(), ConnectStatus::Connecting(addr)),
             None => (None, String::new(), ConnectStatus::Idle),
         };
-        let (local_v4, local_v6) = detect_local_ips();
-        let mode = if bind_addr.is_ipv4() {
-            IpMode::Ipv4
-        } else {
-            IpMode::Ipv6
-        }
-        .fallback(local_v4.is_some(), local_v6.is_some());
+        let local_ip = detect_local_ip(bind_addr.ip());
         Self {
             bind_addr,
             peer_addr,
             peer_input,
             peer_focus: false,
             connect_status,
-            mode,
-            local_v4,
-            local_v6,
-            public_v4: None,
-            public_v6: None,
+            local_ip,
+            public_endpoint: None,
             stun_status: None,
             selected: Vec::new(),
             received: Vec::new(),
@@ -515,8 +504,6 @@ fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &Sender<Net
 fn handle_button_action(app: &mut AppState, action: ButtonAction, net_tx: &Sender<NetCommand>) {
     match action {
         ButtonAction::ConnectPeer => start_connect(app, net_tx),
-        ButtonAction::SelectIpv4 => app.select_mode(IpMode::Ipv4),
-        ButtonAction::SelectIpv6 => app.select_mode(IpMode::Ipv6),
         ButtonAction::CopyLocalIp => copy_local_ip(app),
         ButtonAction::CopyPublicEndpoint => copy_public_endpoint(app),
         ButtonAction::PastePeerIp => paste_peer_ip(app),
@@ -582,7 +569,7 @@ fn handle_peer_input_key(app: &mut AppState, code: KeyCode, net_tx: &Sender<NetC
 }
 
 fn copy_local_ip(app: &mut AppState) {
-    let addr = match app.current_local_ip() {
+    let addr = match app.local_ip {
         Some(addr) => addr,
         None => {
             app.push_log("ip local nao encontrado");
@@ -1057,7 +1044,7 @@ fn render_connection_panel(
         ])
         .split(rows[1]);
 
-    // Linha 3: meu ip + copiar
+    // Linha 2: meu ip + copiar
     let row_mid = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(20), Constraint::Length(12)])
@@ -1075,7 +1062,7 @@ fn render_connection_panel(
     // Input
     let input_title = "ip do parceiro";
 
-    let placeholder = if app.mode == IpMode::Ipv4 {
+    let placeholder = if app.bind_addr.is_ipv4() {
         "ex: 192.0.2.10:5000"
     } else {
         "ex: [2001:db8::1]:5000"
@@ -1163,7 +1150,7 @@ fn render_connection_panel(
 
     // Meu IP
     let local_text = app
-        .current_local_ip()
+        .local_ip
         .map(|addr| addr.to_string())
         .unwrap_or_else(|| "nao encontrado".to_string());
 
@@ -1189,7 +1176,7 @@ fn render_connection_panel(
         .map(|(x, y)| point_in_rect(x, y, copy_button.area))
         .unwrap_or(false);
 
-    let copy_enabled = app.current_local_ip().is_some();
+    let copy_enabled = app.local_ip.is_some();
 
     let copy_style = button_style(theme, theme.accent, copy_hover, copy_enabled);
 
@@ -1261,7 +1248,13 @@ fn render_connection_panel(
     let status = Paragraph::new(status_line).block(block_with_title(theme, "status"));
     frame.render_widget(status, row_status);
 
-    (row_top[0], header_buttons)
+    let buttons = vec![
+        connect_button,
+        paste_button,
+        copy_button,
+        copy_public_button,
+    ];
+    (row_top[0], buttons)
 }
 
 fn render_buttons(frame: &mut Frame, area: Rect, app: &AppState, theme: Theme) -> Vec<Button> {
@@ -1360,15 +1353,10 @@ fn pick_files_dialog() -> Option<Vec<PathBuf>> {
     files
 }
 
-fn detect_local_ips() -> (Option<IpAddr>, Option<IpAddr>) {
+fn detect_local_ip(preferred: IpAddr) -> Option<IpAddr> {
     let mut best_v4 = None;
     let mut best_v6_global = None;
     let mut best_v6_local = None;
-
-    let interfaces = match get_if_addrs() {
-        Ok(list) => list,
-        Err(_) => return (None, None),
-    };
 
     for iface in interfaces {
         match iface.addr {
@@ -1402,6 +1390,8 @@ fn detect_local_ips() -> (Option<IpAddr>, Option<IpAddr>) {
         }
     }
 
-    let v6 = best_v6_global.or(best_v6_local);
-    (best_v4, v6)
+    match preferred {
+        IpAddr::V4(_) => best_v4.or(best_v6_global).or(best_v6_local),
+        IpAddr::V6(_) => best_v6_global.or(best_v6_local).or(best_v4),
+    }
 }
