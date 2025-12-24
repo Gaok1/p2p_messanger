@@ -31,6 +31,28 @@ const MAX_PEER_INPUT: usize = 120;
 const MAX_LOGS: usize = 200;
 const PROGRESS_BAR_WIDTH: usize = 16;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IpMode {
+    Ipv4,
+    Ipv6,
+}
+
+impl IpMode {
+    fn fallback(self, has_v4: bool, has_v6: bool) -> Self {
+        match self {
+            IpMode::Ipv4 if has_v4 => IpMode::Ipv4,
+            IpMode::Ipv6 if has_v6 => IpMode::Ipv6,
+            _ => {
+                if has_v4 {
+                    IpMode::Ipv4
+                } else {
+                    IpMode::Ipv6
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 enum ConnectStatus {
     Idle,
@@ -107,6 +129,8 @@ impl IncomingStatus {
 #[derive(Clone, Copy)]
 enum ButtonAction {
     ConnectPeer,
+    SelectIpv4,
+    SelectIpv6,
     CopyLocalIp,
     CopyPublicEndpoint,
     PastePeerIp,
@@ -160,6 +184,7 @@ pub struct AppState {
     peer_addr: Option<SocketAddr>,
     peer_input: String,
     peer_focus: bool,
+    mode: IpMode,
     connect_status: ConnectStatus,
     local_ip: Option<IpAddr>,
     public_endpoint: Option<SocketAddr>,
@@ -206,6 +231,34 @@ impl AppState {
         if self.logs.len() > MAX_LOGS {
             let excess = self.logs.len() - MAX_LOGS;
             self.logs.drain(0..excess);
+        }
+    }
+
+    fn mode_supported(&self, mode: IpMode) -> bool {
+        match mode {
+            IpMode::Ipv4 => self.local_v4.is_some(),
+            IpMode::Ipv6 => self.local_v6.is_some(),
+        }
+    }
+
+    fn select_mode(&mut self, mode: IpMode) {
+        if self.mode_supported(mode) {
+            self.mode = mode;
+            self.needs_clear = true;
+        }
+    }
+
+    fn current_local_ip(&self) -> Option<IpAddr> {
+        match self.mode {
+            IpMode::Ipv4 => self.local_v4,
+            IpMode::Ipv6 => self.local_v6,
+        }
+    }
+
+    fn current_public_endpoint(&self) -> Option<SocketAddr> {
+        match self.mode {
+            IpMode::Ipv4 => self.public_v4,
+            IpMode::Ipv6 => self.public_v6,
         }
     }
 }
@@ -288,7 +341,11 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
             app.push_log(message);
         }
         NetEvent::PublicEndpoint(endpoint) => {
-            app.public_endpoint = Some(endpoint);
+            if endpoint.is_ipv4() {
+                app.public_v4 = Some(endpoint);
+            } else {
+                app.public_v6 = Some(endpoint);
+            }
             app.stun_status = None;
             app.push_log(format!("endpoint publico {endpoint}"));
         }
@@ -533,7 +590,7 @@ fn copy_local_ip(app: &mut AppState) {
 }
 
 fn copy_public_endpoint(app: &mut AppState) {
-    let endpoint = match app.public_endpoint {
+    let endpoint = match app.current_public_endpoint() {
         Some(endpoint) => endpoint,
         None => {
             app.push_log("endpoint publico nao encontrado");
@@ -675,6 +732,24 @@ fn button_style(theme: Theme, accent: Color, hover: bool, enabled: bool) -> Styl
             .fg(accent)
             .bg(theme.panel)
             .add_modifier(Modifier::BOLD)
+    }
+}
+
+fn mode_button_style(theme: Theme, active: bool, hover: bool, enabled: bool) -> Style {
+    if !enabled {
+        return Style::default()
+            .fg(theme.muted)
+            .bg(theme.panel)
+            .add_modifier(Modifier::DIM);
+    }
+
+    if active {
+        Style::default()
+            .fg(theme.bg)
+            .bg(theme.ok)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        button_style(theme, theme.info, hover, enabled)
     }
 }
 
@@ -822,7 +897,7 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(13), // header/connection
+            Constraint::Length(16), // header/connection (com alternador IPv4/IPv6)
             Constraint::Min(6),     // lists
             Constraint::Length(3),  // buttons
         ])
@@ -898,6 +973,7 @@ fn render_connection_panel(
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(3),
             Constraint::Length(4),
             Constraint::Length(3),
             Constraint::Length(3),
@@ -905,7 +981,60 @@ fn render_connection_panel(
         ])
         .split(area);
 
-    // Linha 1: input + colar + conectar
+    let mut header_buttons = Vec::new();
+
+    // Linha 1: escolha IPv4 / IPv6
+    let row_modes = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(10),
+            Constraint::Length(10),
+            Constraint::Min(0),
+        ])
+        .split(rows[0]);
+
+    // Alternador IPv4 / IPv6
+    let ipv4_button = Button {
+        label: "IPv4".to_string(),
+        area: row_modes[0],
+        action: ButtonAction::SelectIpv4,
+    };
+
+    let ipv6_button = Button {
+        label: "IPv6".to_string(),
+        area: row_modes[1],
+        action: ButtonAction::SelectIpv6,
+    };
+
+    let ipv4_hover = hover
+        .map(|(x, y)| point_in_rect(x, y, ipv4_button.area))
+        .unwrap_or(false);
+    let ipv6_hover = hover
+        .map(|(x, y)| point_in_rect(x, y, ipv6_button.area))
+        .unwrap_or(false);
+
+    let ipv4_enabled = app.mode_supported(IpMode::Ipv4);
+    let ipv6_enabled = app.mode_supported(IpMode::Ipv6);
+
+    let ipv4_style = mode_button_style(theme, app.mode == IpMode::Ipv4, ipv4_hover, ipv4_enabled);
+    let ipv6_style = mode_button_style(theme, app.mode == IpMode::Ipv6, ipv6_hover, ipv6_enabled);
+
+    let ipv4_widget = Paragraph::new(ipv4_button.label.as_str())
+        .alignment(Alignment::Center)
+        .style(ipv4_style)
+        .block(subtle_block(theme));
+    let ipv6_widget = Paragraph::new(ipv6_button.label.as_str())
+        .alignment(Alignment::Center)
+        .style(ipv6_style)
+        .block(subtle_block(theme));
+
+    frame.render_widget(ipv4_widget, ipv4_button.area);
+    frame.render_widget(ipv6_widget, ipv6_button.area);
+
+    header_buttons.push(ipv4_button);
+    header_buttons.push(ipv6_button);
+
+    // Linha 2: input + colar + conectar
     let row_top = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -913,22 +1042,22 @@ fn render_connection_panel(
             Constraint::Length(12),
             Constraint::Length(14),
         ])
-        .split(rows[0]);
+        .split(rows[1]);
 
     // Linha 2: meu ip + copiar
     let row_mid = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(20), Constraint::Length(12)])
-        .split(rows[1]);
+        .split(rows[2]);
 
-    // Linha 3: endpoint publico + copiar
+    // Linha 4: endpoint publico + copiar
     let row_public = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(20), Constraint::Length(12)])
-        .split(rows[2]);
+        .split(rows[3]);
 
-    // Linha 4: status (chips)
-    let row_status = rows[3];
+    // Linha 5: status (chips)
+    let row_status = rows[4];
 
     // Input
     let input_title = "ip do parceiro";
@@ -989,6 +1118,7 @@ fn render_connection_panel(
         .block(subtle_block(theme));
 
     frame.render_widget(paste_widget, paste_button.area);
+    header_buttons.push(paste_button.clone());
 
     // Conectar
     let connect_label = match &app.connect_status {
@@ -1016,6 +1146,7 @@ fn render_connection_panel(
         .block(subtle_block(theme));
 
     frame.render_widget(connect_widget, connect_button.area);
+    header_buttons.push(connect_button.clone());
 
     // Meu IP
     let local_text = app
@@ -1055,9 +1186,10 @@ fn render_connection_panel(
         .block(subtle_block(theme));
 
     frame.render_widget(copy_widget, copy_button.area);
+    header_buttons.push(copy_button.clone());
 
     // Endpoint publico (STUN)
-    let public_text = match (app.public_endpoint, app.stun_status.as_deref()) {
+    let public_text = match (app.current_public_endpoint(), app.stun_status.as_deref()) {
         (Some(addr), _) => addr.to_string(),
         (None, Some(status)) => status.to_string(),
         (None, None) => "aguardando STUN".to_string(),
@@ -1084,7 +1216,7 @@ fn render_connection_panel(
         .map(|(x, y)| point_in_rect(x, y, copy_public_button.area))
         .unwrap_or(false);
 
-    let copy_public_enabled = app.public_endpoint.is_some();
+    let copy_public_enabled = app.current_public_endpoint().is_some();
     let copy_public_style = button_style(theme, theme.info, copy_public_hover, copy_public_enabled);
 
     let copy_public_widget = Paragraph::new(copy_public_button.label.as_str())
@@ -1093,6 +1225,7 @@ fn render_connection_panel(
         .block(subtle_block(theme));
 
     frame.render_widget(copy_public_widget, copy_public_button.area);
+    header_buttons.push(copy_public_button);
 
     // Status (chips)
     let peer_text = app
@@ -1225,7 +1358,6 @@ fn detect_local_ip(preferred: IpAddr) -> Option<IpAddr> {
     let mut best_v6_global = None;
     let mut best_v6_local = None;
 
-    let interfaces = get_if_addrs().ok()?;
     for iface in interfaces {
         match iface.addr {
             IfAddr::V4(v4) => {
