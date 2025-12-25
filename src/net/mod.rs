@@ -182,21 +182,36 @@ async fn run_network_async(
     evt_tx: Sender<NetEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     log_transport_config(&evt_tx);
-    run_stun_detection(bind_addr, &evt_tx);
 
-    let (mut endpoint, _cert) = match make_endpoint(bind_addr) {
-        Ok(ctx) => ctx,
-        Err(err) => {
-            let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir endpoint {err}")));
-            return Ok(());
+    let mut pending_cmds: Vec<NetCommand> = Vec::new();
+
+    let (mut endpoint, _cert) = loop {
+        match make_endpoint(bind_addr) {
+            Ok(ctx) => break ctx,
+            Err(err) => {
+                let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir endpoint {err}")));
+
+                match cmd_rx.recv_timeout(Duration::from_millis(250)) {
+                    Ok(NetCommand::Rebind(new_bind)) => {
+                        if new_bind != bind_addr {
+                            bind_addr = new_bind;
+                        }
+                    }
+                    Ok(NetCommand::Shutdown) => return Ok(()),
+                    Ok(other) => pending_cmds.push(other),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+                }
+            }
         }
     };
+
+    run_stun_detection(bind_addr, &evt_tx);
 
     let mut connected_peer: Option<SocketAddr> = None;
     let mut session_dir: Option<PathBuf> = None;
     let mut incoming: HashMap<u64, IncomingFile> = HashMap::new();
     let mut next_file_id = 1u64;
-    let mut pending_cmds: Vec<NetCommand> = Vec::new();
     let (mut inbound_tx, mut inbound_rx) = tokio_mpsc::unbounded_channel::<(WireMessage, SocketAddr)>();
     let mut reader_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut connection: Option<quinn::Connection> = None;
@@ -244,7 +259,6 @@ async fn run_network_async(
                 NetCommand::Rebind(new_bind) => {
                     if new_bind != bind_addr {
                         let _ = evt_tx.send(NetEvent::Log(format!("reconfigurando bind para {new_bind}")));
-                        run_stun_detection(new_bind, &evt_tx);
                         match make_endpoint(new_bind) {
                             Ok((new_endpoint, _)) => {
                                 endpoint = new_endpoint;
@@ -254,6 +268,7 @@ async fn run_network_async(
                                 session_dir = None;
                                 incoming.clear();
                                 next_file_id = 1;
+                                run_stun_detection(bind_addr, &evt_tx);
                             }
                             Err(err) => {
                                 let _ = evt_tx.send(NetEvent::Log(format!("erro ao reconfigurar {err}")));
