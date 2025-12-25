@@ -318,6 +318,12 @@ fn run_network(
         }
 
         if let Some(socket_ref) = socket.as_mut() {
+            if let (Some(state), Some(peer)) = (punch_state.as_ref(), connected_peer) {
+                if state.peer == peer || state.peer.ip() == peer.ip() {
+                    punch_state = None;
+                }
+            }
+
             if let Some(state) = punch_state.as_mut() {
                 if state.started.elapsed() >= PUNCH_TIMEOUT {
                     let peer = state.peer;
