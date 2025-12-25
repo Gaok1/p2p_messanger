@@ -182,7 +182,6 @@ async fn run_network_async(
     evt_tx: Sender<NetEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     log_transport_config(&evt_tx);
-    run_stun_detection(bind_addr, &evt_tx);
 
     let mut pending_cmds: Vec<NetCommand> = Vec::new();
 
@@ -206,6 +205,8 @@ async fn run_network_async(
             }
         }
     };
+
+    run_stun_detection(bind_addr, &evt_tx);
 
     let mut connected_peer: Option<SocketAddr> = None;
     let mut session_dir: Option<PathBuf> = None;
@@ -258,7 +259,6 @@ async fn run_network_async(
                 NetCommand::Rebind(new_bind) => {
                     if new_bind != bind_addr {
                         let _ = evt_tx.send(NetEvent::Log(format!("reconfigurando bind para {new_bind}")));
-                        run_stun_detection(new_bind, &evt_tx);
                         match make_endpoint(new_bind) {
                             Ok((new_endpoint, _)) => {
                                 endpoint = new_endpoint;
@@ -268,6 +268,7 @@ async fn run_network_async(
                                 session_dir = None;
                                 incoming.clear();
                                 next_file_id = 1;
+                                run_stun_detection(bind_addr, &evt_tx);
                             }
                             Err(err) => {
                                 let _ = evt_tx.send(NetEvent::Log(format!("erro ao reconfigurar {err}")));
