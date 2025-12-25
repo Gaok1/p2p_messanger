@@ -191,16 +191,16 @@ async fn run_network_async(
             Err(err) => {
                 let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir endpoint {err}")));
 
-                match cmd_rx.recv_timeout(Duration::from_millis(250)) {
+                match cmd_rx.recv() {
                     Ok(NetCommand::Rebind(new_bind)) => {
                         if new_bind != bind_addr {
                             bind_addr = new_bind;
+                            run_stun_detection(bind_addr, &evt_tx);
                         }
                     }
                     Ok(NetCommand::Shutdown) => return Ok(()),
                     Ok(other) => pending_cmds.push(other),
-                    Err(mpsc::RecvTimeoutError::Timeout) => {}
-                    Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+                    Err(_) => return Ok(()),
                 }
             }
         }
