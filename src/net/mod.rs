@@ -170,8 +170,15 @@ fn run_network(
     evt_tx: Sender<NetEvent>,
 ) {
     let mut bind_addr = bind_addr;
+    // Aumentamos `max_packets_in_flight` para evitar gargalos de ~500 KB em
+    // transferências confiáveis. O valor padrão (512) limita a quantidade de
+    // pacotes confiáveis simultâneos e acabava esgotando quando enviávamos
+    // arquivos maiores, fazendo a fila travar. Com 4096 pacotes, liberamos
+    // espaço suficiente para fluxos de megabytes mantendo a janela de
+    // retransmissão do Laminar.
     let config = Config {
         heartbeat_interval: Some(Duration::from_secs(2)),
+        max_packets_in_flight: 4096,
         ..Config::default()
     };
     log_transport_config(&config, &evt_tx);
