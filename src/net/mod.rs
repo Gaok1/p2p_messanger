@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use base64::Engine;
 use bincode::Options;
 use laminar::{Config, Socket, SocketEvent};
 
@@ -20,6 +21,7 @@ const CHANNEL_ID: u8 = 0;
 const CHUNK_SIZE: usize = 1024;
 const PUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 const PUNCH_INTERVAL: Duration = Duration::from_millis(200);
+const STUN_MAGIC_COOKIE: u32 = 0x2112A442;
 
 fn log_transport_config(config: &Config, evt_tx: &Sender<NetEvent>) {
     let heartbeat = config
@@ -71,8 +73,42 @@ pub(crate) fn serialize_message(message: &WireMessage) -> bincode::Result<Vec<u8
     bincode_options().serialize(message)
 }
 
+#[allow(dead_code)]
+pub(crate) fn serialize_message_base64(message: &WireMessage) -> bincode::Result<String> {
+    let bytes = serialize_message(message)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 fn deserialize_message(bytes: &[u8]) -> bincode::Result<WireMessage> {
     bincode_options().deserialize(bytes)
+}
+
+fn deserialize_message_base64(text: &str) -> Result<WireMessage, bincode::Error> {
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(text)
+        .map_err(|err| Box::new(bincode::ErrorKind::Custom(err.to_string())))?;
+    deserialize_message(&decoded)
+}
+
+fn decode_payload(payload: &[u8]) -> Result<WireMessage, String> {
+    match deserialize_message(payload) {
+        Ok(msg) => Ok(msg),
+        Err(binary_err) => {
+            let base64_attempt = std::str::from_utf8(payload)
+                .ok()
+                .and_then(|text| deserialize_message_base64(text).ok());
+
+            if let Some(msg) = base64_attempt {
+                Ok(msg)
+            } else {
+                Err(binary_err.to_string())
+            }
+        }
+    }
+}
+
+fn looks_like_stun(payload: &[u8]) -> bool {
+    payload.len() >= 8 && payload[4..8] == STUN_MAGIC_COOKIE.to_be_bytes()
 }
 
 /// Comandos enviados pela UI para a thread de rede.
@@ -198,6 +234,7 @@ fn run_network(
     let mut incoming: HashMap<u64, IncomingFile> = HashMap::new();
     let mut next_file_id = 1u64;
     let mut next_punch_nonce = 1u64;
+    let mut stun_warning_logged = false;
     let mut pending_cmds: Vec<NetCommand> = Vec::new();
 
     'outer: loop {
@@ -206,13 +243,7 @@ fn run_network(
             for cmd in queued {
                 match cmd {
                     NetCommand::Rebind(new_bind) => {
-                        if !apply_rebind(
-                            &mut socket,
-                            &mut bind_addr,
-                            new_bind,
-                            &config,
-                            &evt_tx,
-                        ) {
+                        if !apply_rebind(&mut socket, &mut bind_addr, new_bind, &config, &evt_tx) {
                             break 'outer;
                         }
                         connected_peer = None;
@@ -239,8 +270,7 @@ fn run_network(
                             Ok(true) => break 'outer,
                             Ok(false) => {}
                             Err(err) => {
-                                let _ =
-                                    evt_tx.send(NetEvent::Log(format!("erro interno {err}")));
+                                let _ = evt_tx.send(NetEvent::Log(format!("erro interno {err}")));
                                 break 'outer;
                             }
                         }
@@ -252,13 +282,7 @@ fn run_network(
         while let Ok(cmd) = cmd_rx.try_recv() {
             match cmd {
                 NetCommand::Rebind(new_bind) => {
-                    if !apply_rebind(
-                        &mut socket,
-                        &mut bind_addr,
-                        new_bind,
-                        &config,
-                        &evt_tx,
-                    ) {
+                    if !apply_rebind(&mut socket, &mut bind_addr, new_bind, &config, &evt_tx) {
                         break 'outer;
                     }
                     connected_peer = None;
@@ -294,6 +318,12 @@ fn run_network(
         }
 
         if let Some(socket_ref) = socket.as_mut() {
+            if let (Some(state), Some(peer)) = (punch_state.as_ref(), connected_peer) {
+                if state.peer == peer || state.peer.ip() == peer.ip() {
+                    punch_state = None;
+                }
+            }
+
             if let Some(state) = punch_state.as_mut() {
                 if state.started.elapsed() >= PUNCH_TIMEOUT {
                     let peer = state.peer;
@@ -309,7 +339,7 @@ fn run_network(
             while let Some(event) = socket_ref.recv() {
                 if let SocketEvent::Packet(packet) = event {
                     let from = packet.addr();
-                    match deserialize_message(packet.payload()) {
+                    match decode_payload(packet.payload()) {
                         Ok(message) => {
                             let new_peer = handle_incoming_message(
                                 socket_ref,
@@ -332,8 +362,21 @@ fn run_network(
                             }
                         }
                         Err(err) => {
-                            let _ = evt_tx
-                                .send(NetEvent::Log(format!("erro ao decodificar {err}")));
+                            if looks_like_stun(packet.payload()) {
+                                if !stun_warning_logged {
+                                    let _ = evt_tx.send(NetEvent::Log(
+                                        "ignorado pacote STUN recebido apos detecao".to_string(),
+                                    ));
+                                    stun_warning_logged = true;
+                                }
+                            } else {
+                                let base64_preview = base64::engine::general_purpose::STANDARD
+                                    .encode(packet.payload());
+                                let preview = base64_preview.chars().take(48).collect::<String>();
+                                let _ = evt_tx.send(NetEvent::Log(format!(
+                                    "erro ao decodificar {err}; payload(base64)={preview}"
+                                )));
+                            }
                         }
                     }
                 }
@@ -440,7 +483,9 @@ fn apply_rebind(
         return true;
     }
 
-    let _ = evt_tx.send(NetEvent::Log(format!("reconfigurando bind para {new_bind}")));
+    let _ = evt_tx.send(NetEvent::Log(format!(
+        "reconfigurando bind para {new_bind}"
+    )));
     *socket = None;
     run_stun_detection(new_bind, evt_tx);
     let new_socket = match bind_socket(new_bind, config, evt_tx) {

@@ -6,11 +6,12 @@ use std::{
     path::Path,
     path::PathBuf,
     sync::mpsc::{Receiver, Sender},
-    time::Instant,
+    thread,
+    time::{Duration, Instant},
 };
 
 use chrono::Local;
-use laminar::{Packet, Socket};
+use laminar::{ErrorKind, Packet, Socket};
 
 use super::{NetCommand, NetEvent, WireMessage, serialize_message};
 
@@ -197,14 +198,41 @@ pub(crate) fn send_message(
     channel_id: u8,
 ) {
     match serialize_message(message) {
-        Ok(payload) => {
-            if let Err(err) = socket.send(Packet::reliable_ordered(peer, payload, Some(channel_id)))
-            {
+        Ok(payload) => match send_with_backpressure(socket, peer, payload, channel_id) {
+            Ok(()) => {}
+            Err(err) => {
                 let _ = evt_tx.send(NetEvent::Log(format!("erro ao enviar {err}")));
             }
-        }
+        },
         Err(err) => {
             let _ = evt_tx.send(NetEvent::Log(format!("erro ao serializar {err}")));
+        }
+    }
+}
+
+fn send_with_backpressure(
+    socket: &mut Socket,
+    peer: SocketAddr,
+    payload: Vec<u8>,
+    channel_id: u8,
+) -> laminar::Result<()> {
+    const MAX_RETRIES: usize = 50;
+    const BACKOFF: Duration = Duration::from_millis(5);
+
+    let packet = Packet::reliable_ordered(peer, payload, Some(channel_id));
+    let mut retries = 0;
+
+    loop {
+        match socket.send(packet.clone()) {
+            Ok(()) => return Ok(()),
+            Err(ErrorKind::IOError(err))
+                if err.kind() == io::ErrorKind::WouldBlock && retries < MAX_RETRIES =>
+            {
+                retries += 1;
+                socket.manual_poll(Instant::now());
+                thread::sleep(BACKOFF);
+            }
+            Err(err) => return Err(err),
         }
     }
 }
