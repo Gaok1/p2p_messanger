@@ -5,37 +5,21 @@ use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use base64::Engine;
 use bincode::Options;
-use laminar::{Config, Socket, SocketEvent};
+use quinn::{Endpoint, ServerConfig};
+use tokio::runtime::Runtime;
+use tokio::sync::mpsc as tokio_mpsc;
 
 mod stun;
 mod transfer;
 
-use transfer::{IncomingFile, SendOutcome, handle_incoming_message, handle_send_punch};
+use transfer::{IncomingFile, SendOutcome, handle_incoming_message, send_files};
 
-const CHANNEL_ID: u8 = 0;
 const CHUNK_SIZE: usize = 1024;
-const PUNCH_TIMEOUT: Duration = Duration::from_secs(10);
-const PUNCH_INTERVAL: Duration = Duration::from_millis(200);
-const STUN_MAGIC_COOKIE: u32 = 0x2112A442;
-
-fn log_transport_config(config: &Config, evt_tx: &Sender<NetEvent>) {
-    let heartbeat = config
-        .heartbeat_interval
-        .map(|interval| format!("{interval:?}"))
-        .unwrap_or_else(|| "desabilitado".to_string());
-    let _ = evt_tx.send(NetEvent::Log(format!(
-        "controle de trafego: confiavel/ordenado no canal {CHANNEL_ID}, max_packets_in_flight={}, fragment_size={}, max_packet_size={}, heartbeat={heartbeat}",
-        config.max_packets_in_flight, config.fragment_size, config.max_packet_size
-    )));
-    let _ = evt_tx.send(NetEvent::Log(format!(
-        "dados de arquivo: chunks de {CHUNK_SIZE} bytes com etiquetagem interna do laminar"
-    )));
-}
 
 /// Mensagens enviadas pela camada de rede para trafegar os arquivos.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -107,10 +91,6 @@ fn decode_payload(payload: &[u8]) -> Result<WireMessage, String> {
     }
 }
 
-fn looks_like_stun(payload: &[u8]) -> bool {
-    payload.len() >= 8 && payload[4..8] == STUN_MAGIC_COOKIE.to_be_bytes()
-}
-
 /// Comandos enviados pela UI para a thread de rede.
 pub enum NetCommand {
     ConnectPeer(SocketAddr),
@@ -166,24 +146,6 @@ pub enum NetEvent {
     },
 }
 
-/// Estado temporário utilizado enquanto tentamos perfurar o NAT.
-struct PunchState {
-    peer: SocketAddr,
-    started: Instant,
-    last_sent: Instant,
-}
-
-impl PunchState {
-    fn new(peer: SocketAddr) -> Self {
-        let now = Instant::now();
-        Self {
-            peer,
-            started: now,
-            last_sent: now - PUNCH_INTERVAL,
-        }
-    }
-}
-
 /// Inicia a thread de rede e retorna os canais de comunicação com a UI.
 pub fn start_network(
     bind_addr: SocketAddr,
@@ -205,76 +167,74 @@ fn run_network(
     cmd_rx: Receiver<NetCommand>,
     evt_tx: Sender<NetEvent>,
 ) {
-    let mut bind_addr = bind_addr;
-    // Aumentamos `max_packets_in_flight` para evitar gargalos de ~500 KB em
-    // transferências confiáveis. O valor padrão (512) limita a quantidade de
-    // pacotes confiáveis simultâneos e acabava esgotando quando enviávamos
-    // arquivos maiores, fazendo a fila travar. Com 4096 pacotes, liberamos
-    // espaço suficiente para fluxos de megabytes mantendo a janela de
-    // retransmissão do Laminar.
-    let config = Config {
-        heartbeat_interval: Some(Duration::from_secs(2)),
-        max_packets_in_flight: 4096,
-        ..Config::default()
-    };
-    log_transport_config(&config, &evt_tx);
-    run_stun_detection(bind_addr, &evt_tx);
-    let mut socket = match bind_socket(bind_addr, &config, &evt_tx) {
-        Some(socket) => Some(socket),
-        None => return,
-    };
+    let runtime = Runtime::new().expect("runtime");
+    runtime.block_on(async move {
+        if let Err(err) = run_network_async(bind_addr, initial_peer, cmd_rx, evt_tx).await {
+            eprintln!("net thread error: {err}");
+        }
+    });
+}
 
-    let mut punch_state = initial_peer.map(PunchState::new);
-    if let Some(peer) = punch_state.as_ref().map(|state| state.peer) {
-        let _ = evt_tx.send(NetEvent::PeerConnecting(peer));
-    }
+async fn run_network_async(
+    mut bind_addr: SocketAddr,
+    initial_peer: Option<SocketAddr>,
+    cmd_rx: Receiver<NetCommand>,
+    evt_tx: Sender<NetEvent>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    log_transport_config(&evt_tx);
+    run_stun_detection(bind_addr, &evt_tx);
+
+    let (mut endpoint, _cert) = match make_endpoint(bind_addr) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir endpoint {err}")));
+            return Ok(());
+        }
+    };
 
     let mut connected_peer: Option<SocketAddr> = None;
     let mut session_dir: Option<PathBuf> = None;
     let mut incoming: HashMap<u64, IncomingFile> = HashMap::new();
     let mut next_file_id = 1u64;
-    let mut next_punch_nonce = 1u64;
-    let mut stun_warning_logged = false;
     let mut pending_cmds: Vec<NetCommand> = Vec::new();
+    let (mut inbound_tx, mut inbound_rx) = tokio_mpsc::unbounded_channel::<(WireMessage, SocketAddr)>();
+    let mut reader_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut connection: Option<quinn::Connection> = None;
 
-    'outer: loop {
+    if let Some(peer) = initial_peer {
+        let _ = evt_tx.send(NetEvent::PeerConnecting(peer));
+        if let Some(conn) = connect_peer(&mut endpoint, peer, &evt_tx).await {
+            setup_connection_reader(
+                conn.clone(),
+                &mut inbound_tx,
+                &evt_tx,
+                &mut reader_task,
+            );
+            connected_peer = Some(conn.remote_address());
+            connection = Some(conn);
+            let _ = evt_tx.send(NetEvent::PeerConnected(peer));
+        }
+    }
+
+    loop {
         if !pending_cmds.is_empty() {
-            let queued = pending_cmds.drain(..).collect::<Vec<_>>();
+            let queued: Vec<_> = pending_cmds.drain(..).collect();
             for cmd in queued {
-                match cmd {
-                    NetCommand::Rebind(new_bind) => {
-                        if !apply_rebind(&mut socket, &mut bind_addr, new_bind, &config, &evt_tx) {
-                            break 'outer;
-                        }
-                        connected_peer = None;
-                        punch_state = None;
-                        session_dir = None;
-                        incoming.clear();
-                        next_file_id = 1;
-                        next_punch_nonce = 1;
-                    }
-                    other => {
-                        let Some(socket_ref) = socket.as_mut() else {
-                            break 'outer;
-                        };
-                        match handle_command(
-                            other,
-                            &mut connected_peer,
-                            &mut punch_state,
-                            socket_ref,
-                            &mut next_file_id,
-                            &evt_tx,
-                            &cmd_rx,
-                            &mut pending_cmds,
-                        ) {
-                            Ok(true) => break 'outer,
-                            Ok(false) => {}
-                            Err(err) => {
-                                let _ = evt_tx.send(NetEvent::Log(format!("erro interno {err}")));
-                                break 'outer;
-                            }
-                        }
-                    }
+                let exit = handle_command(
+                    cmd,
+                    &mut connected_peer,
+                    &mut connection,
+                    &mut next_file_id,
+                    &evt_tx,
+                    &cmd_rx,
+                    &mut pending_cmds,
+                    &mut endpoint,
+                    &mut inbound_tx,
+                    &mut reader_task,
+                )
+                .await?;
+                if exit {
+                    return Ok(());
                 }
             }
         }
@@ -282,146 +242,135 @@ fn run_network(
         while let Ok(cmd) = cmd_rx.try_recv() {
             match cmd {
                 NetCommand::Rebind(new_bind) => {
-                    if !apply_rebind(&mut socket, &mut bind_addr, new_bind, &config, &evt_tx) {
-                        break 'outer;
+                    if new_bind != bind_addr {
+                        let _ = evt_tx.send(NetEvent::Log(format!("reconfigurando bind para {new_bind}")));
+                        run_stun_detection(new_bind, &evt_tx);
+                        match make_endpoint(new_bind) {
+                            Ok((new_endpoint, _)) => {
+                                endpoint = new_endpoint;
+                                bind_addr = new_bind;
+                                connection = None;
+                                connected_peer = None;
+                                session_dir = None;
+                                incoming.clear();
+                                next_file_id = 1;
+                            }
+                            Err(err) => {
+                                let _ = evt_tx.send(NetEvent::Log(format!("erro ao reconfigurar {err}")));
+                            }
+                        }
                     }
-                    connected_peer = None;
-                    punch_state = None;
-                    session_dir = None;
-                    incoming.clear();
-                    next_file_id = 1;
-                    next_punch_nonce = 1;
                 }
                 other => {
-                    let Some(socket_ref) = socket.as_mut() else {
-                        break 'outer;
-                    };
-                    match handle_command(
+                    let exit = handle_command(
                         other,
                         &mut connected_peer,
-                        &mut punch_state,
-                        socket_ref,
+                        &mut connection,
                         &mut next_file_id,
                         &evt_tx,
                         &cmd_rx,
                         &mut pending_cmds,
-                    ) {
-                        Ok(true) => break 'outer,
-                        Ok(false) => {}
-                        Err(err) => {
-                            let _ = evt_tx.send(NetEvent::Log(format!("erro interno {err}")));
-                            break 'outer;
-                        }
-                    }
+                        &mut endpoint,
+                        &mut inbound_tx,
+                        &mut reader_task,
+                    ).await?;
+                    if exit { return Ok(()); }
                 }
             }
         }
 
-        if let Some(socket_ref) = socket.as_mut() {
-            if let (Some(state), Some(peer)) = (punch_state.as_ref(), connected_peer) {
-                if state.peer == peer || state.peer.ip() == peer.ip() {
-                    punch_state = None;
-                }
-            }
-
-            if let Some(state) = punch_state.as_mut() {
-                if state.started.elapsed() >= PUNCH_TIMEOUT {
-                    let peer = state.peer;
-                    punch_state = None;
-                    let _ = evt_tx.send(NetEvent::PeerTimeout(peer));
-                } else if state.last_sent.elapsed() >= PUNCH_INTERVAL {
-                    handle_send_punch(socket_ref, state.peer, next_punch_nonce, &evt_tx);
-                    next_punch_nonce = next_punch_nonce.wrapping_add(1);
-                    state.last_sent = Instant::now();
-                }
-            }
-
-            while let Some(event) = socket_ref.recv() {
-                if let SocketEvent::Packet(packet) = event {
-                    let from = packet.addr();
-                    match decode_payload(packet.payload()) {
-                        Ok(message) => {
-                            let new_peer = handle_incoming_message(
-                                socket_ref,
-                                message,
-                                from,
-                                &mut connected_peer,
-                                &mut session_dir,
-                                &mut incoming,
+        tokio::select! {
+            incoming = endpoint.accept() => {
+                if let Some(connecting) = incoming {
+                    match connecting.await {
+                        Ok(new_conn) => {
+                            connected_peer = Some(new_conn.remote_address());
+                            setup_connection_reader(
+                                new_conn.clone(),
+                                &mut inbound_tx,
                                 &evt_tx,
-                                CHANNEL_ID,
+                                &mut reader_task,
                             );
-                            if new_peer {
-                                if let Some(state) = punch_state.as_mut() {
-                                    if state.peer == from || state.peer.ip() == from.ip() {
-                                        state.peer = from;
-                                        punch_state = None;
-                                    }
-                                }
-                                let _ = evt_tx.send(NetEvent::PeerConnected(from));
-                            }
+                            connection = Some(new_conn.clone());
+                            let _ = evt_tx.send(NetEvent::PeerConnected(new_conn.remote_address()));
                         }
                         Err(err) => {
-                            if looks_like_stun(packet.payload()) {
-                                if !stun_warning_logged {
-                                    let _ = evt_tx.send(NetEvent::Log(
-                                        "ignorado pacote STUN recebido apos detecao".to_string(),
-                                    ));
-                                    stun_warning_logged = true;
-                                }
-                            } else {
-                                let base64_preview = base64::engine::general_purpose::STANDARD
-                                    .encode(packet.payload());
-                                let preview = base64_preview.chars().take(48).collect::<String>();
-                                let _ = evt_tx.send(NetEvent::Log(format!(
-                                    "erro ao decodificar {err}; payload(base64)={preview}"
-                                )));
-                            }
+                            let _ = evt_tx.send(NetEvent::Log(format!("erro ao aceitar {err}")));
                         }
                     }
                 }
             }
-
-            socket_ref.manual_poll(Instant::now());
+            Some((message, from)) = async {
+                match inbound_rx.recv().await {
+                    Some(msg) => Some(msg),
+                    None => None,
+                }
+            } => {
+                if let Some(conn) = connection.as_ref() {
+                    let new_peer = handle_incoming_message(
+                        conn,
+                        message,
+                        from,
+                        &mut connected_peer,
+                        &mut session_dir,
+                        &mut incoming,
+                        &evt_tx,
+                    ).await;
+                    if new_peer {
+                        let _ = evt_tx.send(NetEvent::PeerConnected(from));
+                    }
+                } else {
+                    let _ = evt_tx.send(NetEvent::Log("mensagem recebida sem conexao".to_string()));
+                }
+            }
+            else => {
+                break;
+            }
         }
-
-        thread::sleep(Duration::from_millis(10));
     }
+
+    let _ = reader_task.take().map(|t| t.abort());
+    Ok(())
 }
 
-fn handle_command(
+async fn handle_command(
     cmd: NetCommand,
     connected_peer: &mut Option<SocketAddr>,
-    punch_state: &mut Option<PunchState>,
-    socket: &mut Socket,
+    connection: &mut Option<quinn::Connection>,
     next_file_id: &mut u64,
     evt_tx: &Sender<NetEvent>,
     cmd_rx: &Receiver<NetCommand>,
     pending_cmds: &mut Vec<NetCommand>,
+    endpoint: &mut Endpoint,
+    inbound_tx: &mut tokio_mpsc::UnboundedSender<(WireMessage, SocketAddr)>,
+    reader_task: &mut Option<tokio::task::JoinHandle<()>>,
 ) -> io::Result<bool> {
     match cmd {
         NetCommand::ConnectPeer(addr) => {
-            *connected_peer = None;
-            *punch_state = Some(PunchState::new(addr));
+            *connected_peer = Some(addr);
             let _ = evt_tx.send(NetEvent::PeerConnecting(addr));
+            if let Some(conn) = connect_peer(endpoint, addr, evt_tx).await {
+                setup_connection_reader(conn.clone(), inbound_tx, evt_tx, reader_task);
+                *connection = Some(conn);
+                let _ = evt_tx.send(NetEvent::PeerConnected(addr));
+            }
         }
         NetCommand::Rebind(_) => {}
         NetCommand::CancelTransfers => {
             let _ = evt_tx.send(NetEvent::Log("cancelamento solicitado".to_string()));
         }
         NetCommand::SendFiles(files) => {
-            if let Some(peer) = *connected_peer {
-                match transfer::send_files(
-                    socket,
+            if let (Some(peer), Some(conn)) = (*connected_peer, connection) {
+                match send_files(
+                    conn,
                     peer,
                     &files,
                     next_file_id,
                     evt_tx,
                     cmd_rx,
                     pending_cmds,
-                    CHANNEL_ID,
                     CHUNK_SIZE,
-                ) {
+                ).await {
                     Ok(SendOutcome::Completed) => {}
                     Ok(SendOutcome::Canceled) => {
                         let _ = evt_tx.send(NetEvent::Log("transferencia cancelada".to_string()));
@@ -455,46 +404,168 @@ fn run_stun_detection(bind_addr: SocketAddr, evt_tx: &Sender<NetEvent>) {
     }
 }
 
-fn bind_socket(
-    bind_addr: SocketAddr,
-    config: &Config,
-    evt_tx: &Sender<NetEvent>,
-) -> Option<Socket> {
-    match Socket::bind_with_config(bind_addr, config.clone()) {
-        Ok(socket) => {
-            let _ = evt_tx.send(NetEvent::Log(format!("escutando {bind_addr}")));
-            Some(socket)
+fn log_transport_config(evt_tx: &Sender<NetEvent>) {
+    let _ = evt_tx.send(NetEvent::Log("transporte QUIC: streams confiaveis com TLS 1.3".to_string()));
+    let _ = evt_tx.send(NetEvent::Log(format!(
+        "dados de arquivo: streams unidirecionais com chunks de {CHUNK_SIZE} bytes"
+    )));
+}
+
+fn make_endpoint(bind_addr: SocketAddr) -> Result<(Endpoint, Vec<u8>), Box<dyn std::error::Error>> {
+    let cert = rcgen::generate_simple_self_signed(["pasta-p2p.local".into()])?;
+    let cert_der = cert.serialize_der()?;
+    let priv_key = cert.serialize_private_key_der();
+
+    let server_config = make_server_config(cert_der.clone(), priv_key.clone())?;
+    let client_config = make_client_config();
+    let mut endpoint = Endpoint::server(server_config, bind_addr)?;
+    endpoint.set_default_client_config(client_config);
+    Ok((endpoint, cert_der))
+}
+
+fn make_server_config(cert_der: Vec<u8>, key_der: Vec<u8>) -> Result<ServerConfig, Box<dyn std::error::Error>> {
+    let cert_chain = vec![quinn::rustls::pki_types::CertificateDer::from(cert_der)];
+    let key = quinn::rustls::pki_types::PrivateKeyDer::Pkcs8(key_der.into());
+    let mut server_config = ServerConfig::with_single_cert(cert_chain, key)?;
+    let mut transport = quinn::TransportConfig::default();
+    transport.keep_alive_interval(Some(Duration::from_secs(5)));
+    if let Ok(timeout) = quinn::IdleTimeout::try_from(Duration::from_secs(60)) {
+        transport.max_idle_timeout(Some(timeout));
+    }
+    server_config.transport = std::sync::Arc::new(transport);
+    Ok(server_config)
+}
+
+fn make_client_config() -> quinn::ClientConfig {
+    use quinn::rustls::{self, client::danger, DigitallySignedStruct, SignatureScheme};
+
+    #[derive(Debug)]
+    struct SkipVerifier;
+    impl danger::ServerCertVerifier for SkipVerifier {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &rustls::pki_types::CertificateDer<'_>,
+            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            _server_name: &rustls::pki_types::ServerName<'_>,
+            _ocsp: &[u8],
+            _now: rustls::pki_types::UnixTime,
+        ) -> Result<danger::ServerCertVerified, rustls::Error> {
+            Ok(danger::ServerCertVerified::assertion())
         }
+
+        fn verify_tls12_signature(
+            &self,
+            _message: &[u8],
+            _cert: &rustls::pki_types::CertificateDer<'_>,
+            _dss: &DigitallySignedStruct,
+        ) -> Result<danger::HandshakeSignatureValid, rustls::Error> {
+            Ok(danger::HandshakeSignatureValid::assertion())
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            _message: &[u8],
+            _cert: &rustls::pki_types::CertificateDer<'_>,
+            _dss: &DigitallySignedStruct,
+        ) -> Result<danger::HandshakeSignatureValid, rustls::Error> {
+            Ok(danger::HandshakeSignatureValid::assertion())
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+            rustls::crypto::ring::default_provider()
+                .signature_verification_algorithms
+                .supported_schemes()
+        }
+    }
+
+    let mut crypto = rustls::ClientConfig::builder_with_provider(
+        rustls::crypto::ring::default_provider().into(),
+    )
+    .with_protocol_versions(&[&rustls::version::TLS13])
+    .expect("tls13")
+    .dangerous()
+    .with_custom_certificate_verifier(std::sync::Arc::new(SkipVerifier))
+    .with_no_client_auth();
+
+    crypto.alpn_protocols = vec![b"hq-29".to_vec()];
+
+    let crypto = quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
+        .expect("quic client config");
+
+    quinn::ClientConfig::new(std::sync::Arc::new(crypto))
+}
+
+async fn connect_peer(endpoint: &mut Endpoint, peer: SocketAddr, evt_tx: &Sender<NetEvent>) -> Option<quinn::Connection> {
+    match endpoint.connect(peer, "pasta") {
+        Ok(connecting) => match connecting.await {
+            Ok(connection) => Some(connection),
+            Err(err) => {
+                let _ = evt_tx.send(NetEvent::Log(format!("erro ao conectar {err}")));
+                None
+            }
+        },
         Err(err) => {
-            let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir socket {err}")));
+            let _ = evt_tx.send(NetEvent::Log(format!("erro ao iniciar conexao {err}")));
             None
         }
     }
 }
 
-fn apply_rebind(
-    socket: &mut Option<Socket>,
-    bind_addr: &mut SocketAddr,
-    new_bind: SocketAddr,
-    config: &Config,
+fn setup_connection_reader(
+    connection: quinn::Connection,
+    inbound_tx: &mut tokio_mpsc::UnboundedSender<(WireMessage, SocketAddr)>,
     evt_tx: &Sender<NetEvent>,
-) -> bool {
-    if new_bind == *bind_addr {
-        return true;
-    }
+    reader_task: &mut Option<tokio::task::JoinHandle<()>>,
+) {
+    let inbound = inbound_tx.clone();
+    let evt_tx = evt_tx.clone();
+    let handle = tokio::spawn(async move {
+        loop {
+            match connection.accept_uni().await {
+                Ok(mut stream) => {
+                    match read_framed(&mut stream).await {
+                        Ok(payload) => match decode_payload(&payload) {
+                            Ok(message) => {
+                                let _ = inbound.send((message, connection.remote_address()));
+                            }
+                            Err(err) => {
+                                let base64_preview = base64::engine::general_purpose::STANDARD
+                                    .encode(&payload);
+                                let preview = base64_preview.chars().take(48).collect::<String>();
+                                let _ = evt_tx.send(NetEvent::Log(format!(
+                                    "erro ao decodificar {err}; payload(base64)={preview}"
+                                )));
+                            }
+                        },
+                        Err(err) => {
+                            let _ = evt_tx.send(NetEvent::Log(format!("stream encerrado {err}")));
+                            break;
+                        }
+                    }
+                }
+                Err(err) => {
+                    let _ = evt_tx.send(NetEvent::Log(format!("conexao encerrada {err}")));
+                    break;
+                }
+            }
+        }
+    });
+    *reader_task = Some(handle);
+}
 
-    let _ = evt_tx.send(NetEvent::Log(format!(
-        "reconfigurando bind para {new_bind}"
-    )));
-    *socket = None;
-    run_stun_detection(new_bind, evt_tx);
-    let new_socket = match bind_socket(new_bind, config, evt_tx) {
-        Some(socket) => socket,
-        None => return false,
-    };
-    *socket = Some(new_socket);
-    *bind_addr = new_bind;
-    true
+async fn read_framed(stream: &mut quinn::RecvStream) -> io::Result<Vec<u8>> {
+    let mut len_buf = [0u8; 4];
+    stream
+        .read_exact(&mut len_buf)
+        .await
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut payload = vec![0u8; len];
+    stream
+        .read_exact(&mut payload)
+        .await
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    Ok(payload)
 }
 
 #[cfg(test)]

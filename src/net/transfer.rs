@@ -1,19 +1,20 @@
 use std::{
     collections::HashMap,
-    fs::{self, File},
-    io::{self, Read, Write},
+    io,
     net::SocketAddr,
-    path::Path,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc::{Receiver, Sender},
-    thread,
-    time::{Duration, Instant},
 };
 
 use chrono::Local;
-use laminar::{ErrorKind, Packet, Socket};
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, AsyncWriteExt},
+};
 
-use super::{NetCommand, NetEvent, WireMessage, serialize_message};
+use super::{
+    NetCommand, NetEvent, WireMessage, serialize_message,
+};
 
 /// Representa um arquivo que está chegando do par.
 pub(crate) struct IncomingFile {
@@ -32,15 +33,14 @@ pub(crate) enum SendOutcome {
 
 /// Processa mensagens recebidas pela rede, atualizando o estado e retornando
 /// `true` se um novo par foi identificado.
-pub(crate) fn handle_incoming_message(
-    socket: &mut Socket,
+pub(crate) async fn handle_incoming_message(
+    connection: &quinn::Connection,
     message: WireMessage,
     from: SocketAddr,
     peer_addr: &mut Option<SocketAddr>,
     session_dir: &mut Option<PathBuf>,
     incoming: &mut HashMap<u64, IncomingFile>,
     evt_tx: &Sender<NetEvent>,
-    channel_id: u8,
 ) -> bool {
     let mut new_peer = false;
     if peer_addr.is_none() {
@@ -51,23 +51,22 @@ pub(crate) fn handle_incoming_message(
     match message {
         WireMessage::Hello { .. } => {
             if session_dir.is_none() {
-                if let Err(err) = ensure_session_dir(session_dir, evt_tx) {
+                if let Err(err) = ensure_session_dir(session_dir, evt_tx).await {
                     let _ = evt_tx.send(NetEvent::Log(format!("erro na sessao {err}")));
                 }
             }
         }
         WireMessage::Punch { .. } => {
-            send_message(
-                socket,
-                from,
+            let _ = send_message(
+                connection,
                 &WireMessage::Hello { version: 1 },
                 evt_tx,
-                channel_id,
-            );
+            )
+            .await;
         }
         WireMessage::Cancel { file_id } => {
             if let Some(entry) = incoming.remove(&file_id) {
-                let _ = fs::remove_file(&entry.path);
+                let _ = tokio::fs::remove_file(&entry.path).await;
                 let _ = evt_tx.send(NetEvent::ReceiveCanceled {
                     file_id,
                     path: entry.path,
@@ -79,7 +78,7 @@ pub(crate) fn handle_incoming_message(
             name,
             size,
         } => {
-            let dir = match ensure_session_dir(session_dir, evt_tx) {
+            let dir = match ensure_session_dir(session_dir, evt_tx).await {
                 Ok(dir) => dir,
                 Err(err) => {
                     let _ = evt_tx.send(NetEvent::Log(format!("erro na sessao {err}")));
@@ -88,7 +87,7 @@ pub(crate) fn handle_incoming_message(
             };
             let safe_name = sanitize_file_name(&name);
             let path = dir.join(safe_name);
-            match File::create(&path) {
+            match File::create(&path).await {
                 Ok(file) => {
                     let _ = evt_tx.send(NetEvent::ReceiveStarted {
                         file_id,
@@ -113,39 +112,43 @@ pub(crate) fn handle_incoming_message(
         }
         WireMessage::FileChunk { file_id, data } => {
             if let Some(entry) = incoming.get_mut(&file_id) {
-                if let Err(err) = entry.file.write_all(&data) {
-                    let _ = evt_tx.send(NetEvent::Log(format!("erro ao gravar {err}")));
-                } else {
-                    entry.bytes_written += data.len() as u64;
-                    let _ = evt_tx.send(NetEvent::ReceiveProgress {
-                        file_id,
-                        bytes_received: entry.bytes_written,
-                        size: entry.size,
-                    });
+                match entry.file.write_all(&data).await {
+                    Ok(()) => {
+                        entry.bytes_written += data.len() as u64;
+                        let _ = evt_tx.send(NetEvent::ReceiveProgress {
+                            file_id,
+                            bytes_received: entry.bytes_written,
+                            size: entry.size,
+                        });
+                    }
+                    Err(err) => {
+                        let _ = evt_tx.send(NetEvent::Log(format!("erro ao gravar {err}")));
+                    }
                 }
             }
         }
         WireMessage::FileDone { file_id } => {
-            if let Some(mut entry) = incoming.remove(&file_id) {
-                let _ = entry.file.flush();
-                let _ = evt_tx.send(NetEvent::FileReceived {
-                    file_id,
-                    path: entry.path.clone(),
-                });
-                if entry.bytes_written != entry.size {
+            if let Some(entry) = incoming.get(&file_id) {
+                if entry.bytes_written == entry.size {
+                    let _ = evt_tx.send(NetEvent::FileReceived {
+                        file_id,
+                        path: entry.path.clone(),
+                    });
+                } else {
                     let _ = evt_tx.send(NetEvent::Log(format!(
                         "tamanho divergente {} bytes",
                         entry.bytes_written
                     )));
                 }
             }
+            incoming.remove(&file_id);
         }
     }
 
     new_peer
 }
 
-fn ensure_session_dir(
+async fn ensure_session_dir(
     session_dir: &mut Option<PathBuf>,
     evt_tx: &Sender<NetEvent>,
 ) -> io::Result<PathBuf> {
@@ -155,7 +158,7 @@ fn ensure_session_dir(
 
     let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let dir = std::env::current_dir()?.join("received").join(timestamp);
-    fs::create_dir_all(&dir)?;
+    tokio::fs::create_dir_all(&dir).await?;
     *session_dir = Some(dir.clone());
     let _ = evt_tx.send(NetEvent::SessionDir(dir.clone()));
     Ok(dir)
@@ -170,71 +173,33 @@ fn sanitize_file_name(name: &str) -> String {
         .to_string()
 }
 
-/// Envia mensagens de perfuração periódicas para manter o socket aberto.
-pub(crate) fn handle_send_punch(
-    socket: &mut Socket,
-    peer: SocketAddr,
-    nonce: u64,
-    evt_tx: &Sender<NetEvent>,
-) {
-    match serialize_message(&WireMessage::Punch { nonce }) {
-        Ok(payload) => {
-            if let Err(err) = socket.send(Packet::unreliable(peer, payload)) {
-                let _ = evt_tx.send(NetEvent::Log(format!("erro ao enviar punch {err}")));
-            }
-        }
-        Err(err) => {
-            let _ = evt_tx.send(NetEvent::Log(format!("erro ao serializar {err}")));
-        }
-    }
-}
-
 /// Envia um pacote de controle confiável para o par.
-pub(crate) fn send_message(
-    socket: &mut Socket,
-    peer: SocketAddr,
+pub(crate) async fn send_message(
+    connection: &quinn::Connection,
     message: &WireMessage,
     evt_tx: &Sender<NetEvent>,
-    channel_id: u8,
-) {
+) -> Result<(), quinn::WriteError> {
     match serialize_message(message) {
-        Ok(payload) => match send_with_backpressure(socket, peer, payload, channel_id) {
-            Ok(()) => {}
-            Err(err) => {
+        Ok(payload) => {
+            let mut stream = connection.open_uni().await?;
+            if let Err(err) = write_framed(&mut stream, &payload).await {
                 let _ = evt_tx.send(NetEvent::Log(format!("erro ao enviar {err}")));
             }
-        },
+            let _ = stream.finish();
+            Ok(())
+        }
         Err(err) => {
             let _ = evt_tx.send(NetEvent::Log(format!("erro ao serializar {err}")));
+            Ok(())
         }
     }
 }
 
-fn send_with_backpressure(
-    socket: &mut Socket,
-    peer: SocketAddr,
-    payload: Vec<u8>,
-    channel_id: u8,
-) -> laminar::Result<()> {
-    const MAX_RETRIES: usize = 50;
-    const BACKOFF: Duration = Duration::from_millis(5);
-
-    let packet = Packet::reliable_ordered(peer, payload, Some(channel_id));
-    let mut retries = 0;
-
-    loop {
-        match socket.send(packet.clone()) {
-            Ok(()) => return Ok(()),
-            Err(ErrorKind::IOError(err))
-                if err.kind() == io::ErrorKind::WouldBlock && retries < MAX_RETRIES =>
-            {
-                retries += 1;
-                socket.manual_poll(Instant::now());
-                thread::sleep(BACKOFF);
-            }
-            Err(err) => return Err(err),
-        }
-    }
+async fn write_framed(stream: &mut quinn::SendStream, payload: &[u8]) -> io::Result<()> {
+    let len = payload.len() as u32;
+    stream.write_all(&len.to_be_bytes()).await?;
+    stream.write_all(payload).await?;
+    Ok(())
 }
 
 /// Processa a fila de comandos durante um envio para detectar cancelamentos ou encerramentos.
@@ -257,24 +222,17 @@ pub(crate) fn handle_send_control(
 }
 
 /// Envia os arquivos para o par conectado respeitando cancelamentos da UI.
-pub(crate) fn send_files(
-    socket: &mut Socket,
-    peer: SocketAddr,
+pub(crate) async fn send_files(
+    connection: &quinn::Connection,
+    _peer: SocketAddr,
     files: &[PathBuf],
     next_file_id: &mut u64,
     evt_tx: &Sender<NetEvent>,
     cmd_rx: &Receiver<NetCommand>,
     pending_cmds: &mut Vec<NetCommand>,
-    channel_id: u8,
     chunk_size: usize,
 ) -> io::Result<SendOutcome> {
-    send_message(
-        socket,
-        peer,
-        &WireMessage::Hello { version: 1 },
-        evt_tx,
-        channel_id,
-    );
+    let _ = send_message(connection, &WireMessage::Hello { version: 1 }, evt_tx).await;
 
     for path in files {
         match handle_send_control(cmd_rx, pending_cmds) {
@@ -283,8 +241,8 @@ pub(crate) fn send_files(
             SendOutcome::Completed => {}
         }
 
-        let mut file = File::open(path)?;
-        let metadata = file.metadata()?;
+        let mut file = File::open(path).await?;
+        let metadata = file.metadata().await?;
         let size = metadata.len();
         let name = path
             .file_name()
@@ -294,17 +252,16 @@ pub(crate) fn send_files(
         let file_id = *next_file_id;
         *next_file_id += 1;
 
-        send_message(
-            socket,
-            peer,
+        let _ = send_message(
+            connection,
             &WireMessage::FileMeta {
                 file_id,
                 name,
                 size,
             },
             evt_tx,
-            channel_id,
-        );
+        )
+        .await;
         let _ = evt_tx.send(NetEvent::SendStarted {
             file_id,
             path: path.clone(),
@@ -314,32 +271,35 @@ pub(crate) fn send_files(
         let mut buffer = vec![0u8; chunk_size];
         let mut sent_bytes = 0u64;
         loop {
-            let read = file.read(&mut buffer)?;
+            let read = file.read(&mut buffer).await?;
             if read == 0 {
                 break;
             }
 
-            send_message(
-                socket,
-                peer,
+            let _ = send_message(
+                connection,
                 &WireMessage::FileChunk {
                     file_id,
                     data: buffer[..read].to_vec(),
                 },
                 evt_tx,
-                channel_id,
-            );
+            )
+            .await;
             sent_bytes += read as u64;
             let _ = evt_tx.send(NetEvent::SendProgress {
                 file_id,
                 bytes_sent: sent_bytes,
                 size,
             });
-            socket.manual_poll(Instant::now());
 
             match handle_send_control(cmd_rx, pending_cmds) {
                 SendOutcome::Canceled => {
-                    send_cancel(socket, peer, file_id, evt_tx, channel_id);
+                    let _ = send_message(
+                        connection,
+                        &WireMessage::Cancel { file_id },
+                        evt_tx,
+                    )
+                    .await;
                     let _ = evt_tx.send(NetEvent::SendCanceled {
                         file_id,
                         path: path.clone(),
@@ -347,20 +307,19 @@ pub(crate) fn send_files(
                     return Ok(SendOutcome::Canceled);
                 }
                 SendOutcome::Shutdown => {
-                    send_cancel(socket, peer, file_id, evt_tx, channel_id);
+                    let _ = send_message(
+                        connection,
+                        &WireMessage::Cancel { file_id },
+                        evt_tx,
+                    )
+                    .await;
                     return Ok(SendOutcome::Shutdown);
                 }
                 SendOutcome::Completed => {}
             }
         }
 
-        send_message(
-            socket,
-            peer,
-            &WireMessage::FileDone { file_id },
-            evt_tx,
-            channel_id,
-        );
+        let _ = send_message(connection, &WireMessage::FileDone { file_id }, evt_tx).await;
         let _ = evt_tx.send(NetEvent::FileSent {
             file_id,
             path: path.clone(),
@@ -368,20 +327,4 @@ pub(crate) fn send_files(
     }
 
     Ok(SendOutcome::Completed)
-}
-
-fn send_cancel(
-    socket: &mut Socket,
-    peer: SocketAddr,
-    file_id: u64,
-    evt_tx: &Sender<NetEvent>,
-    channel_id: u8,
-) {
-    send_message(
-        socket,
-        peer,
-        &WireMessage::Cancel { file_id },
-        evt_tx,
-        channel_id,
-    );
 }
