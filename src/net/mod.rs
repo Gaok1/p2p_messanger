@@ -12,13 +12,17 @@ use base64::Engine;
 use bincode::Options;
 use laminar::{Config, Socket, SocketEvent};
 
+mod packet_manager;
 mod stun;
 mod transfer;
 
+use packet_manager::PacketManager;
 use transfer::{IncomingFile, SendOutcome, handle_incoming_message, handle_send_punch};
 
 const CHANNEL_ID: u8 = 0;
 const CHUNK_SIZE: usize = 1024;
+const MAX_PACKET_PAYLOAD: usize = 1200;
+const THROTTLE_BYTES_PER_SECOND: u64 = 512 * 1024;
 const PUNCH_TIMEOUT: Duration = Duration::from_secs(10);
 const PUNCH_INTERVAL: Duration = Duration::from_millis(200);
 const STUN_MAGIC_COOKIE: u32 = 0x2112A442;
@@ -29,11 +33,15 @@ fn log_transport_config(config: &Config, evt_tx: &Sender<NetEvent>) {
         .map(|interval| format!("{interval:?}"))
         .unwrap_or_else(|| "desabilitado".to_string());
     let _ = evt_tx.send(NetEvent::Log(format!(
-        "controle de trafego: confiavel/ordenado no canal {CHANNEL_ID}, max_packets_in_flight={}, fragment_size={}, max_packet_size={}, heartbeat={heartbeat}",
-        config.max_packets_in_flight, config.fragment_size, config.max_packet_size
+        "controle de trafego: confiavel/ordenado no canal {CHANNEL_ID}, max_packets_in_flight={}, fragment_size={}, max_packet_size={}, heartbeat={heartbeat}, payload_max={}B, throttle={}B/s",
+        config.max_packets_in_flight,
+        config.fragment_size,
+        config.max_packet_size,
+        MAX_PACKET_PAYLOAD,
+        THROTTLE_BYTES_PER_SECOND
     )));
     let _ = evt_tx.send(NetEvent::Log(format!(
-        "dados de arquivo: chunks de {CHUNK_SIZE} bytes com etiquetagem interna do laminar"
+        "dados de arquivo: chunks de {CHUNK_SIZE} bytes com fragmentacao propria"
     )));
 }
 
@@ -109,6 +117,28 @@ fn decode_payload(payload: &[u8]) -> Result<WireMessage, String> {
 
 fn looks_like_stun(payload: &[u8]) -> bool {
     payload.len() >= 8 && payload[4..8] == STUN_MAGIC_COOKIE.to_be_bytes()
+}
+
+fn log_decode_error(
+    evt_tx: &Sender<NetEvent>,
+    payload: &[u8],
+    err: String,
+    stun_warning_logged: &mut bool,
+) {
+    if looks_like_stun(payload) {
+        if !*stun_warning_logged {
+            let _ = evt_tx.send(NetEvent::Log(
+                "ignorado pacote STUN recebido apos detecao".to_string(),
+            ));
+            *stun_warning_logged = true;
+        }
+    } else {
+        let base64_preview = base64::engine::general_purpose::STANDARD.encode(payload);
+        let preview = base64_preview.chars().take(48).collect::<String>();
+        let _ = evt_tx.send(NetEvent::Log(format!(
+            "erro ao decodificar {err}; payload(base64)={preview}"
+        )));
+    }
 }
 
 /// Comandos enviados pela UI para a thread de rede.
@@ -223,6 +253,7 @@ fn run_network(
         Some(socket) => Some(socket),
         None => return,
     };
+    let mut packet_manager = PacketManager::new(MAX_PACKET_PAYLOAD, THROTTLE_BYTES_PER_SECOND);
 
     let mut punch_state = initial_peer.map(PunchState::new);
     if let Some(peer) = punch_state.as_ref().map(|state| state.peer) {
@@ -266,6 +297,7 @@ fn run_network(
                             &evt_tx,
                             &cmd_rx,
                             &mut pending_cmds,
+                            &mut packet_manager,
                         ) {
                             Ok(true) => break 'outer,
                             Ok(false) => {}
@@ -305,6 +337,7 @@ fn run_network(
                         &evt_tx,
                         &cmd_rx,
                         &mut pending_cmds,
+                        &mut packet_manager,
                     ) {
                         Ok(true) => break 'outer,
                         Ok(false) => {}
@@ -330,7 +363,13 @@ fn run_network(
                     punch_state = None;
                     let _ = evt_tx.send(NetEvent::PeerTimeout(peer));
                 } else if state.last_sent.elapsed() >= PUNCH_INTERVAL {
-                    handle_send_punch(socket_ref, state.peer, next_punch_nonce, &evt_tx);
+                    handle_send_punch(
+                        socket_ref,
+                        state.peer,
+                        next_punch_nonce,
+                        &evt_tx,
+                        &mut packet_manager,
+                    );
                     next_punch_nonce = next_punch_nonce.wrapping_add(1);
                     state.last_sent = Instant::now();
                 }
@@ -339,44 +378,47 @@ fn run_network(
             while let Some(event) = socket_ref.recv() {
                 if let SocketEvent::Packet(packet) = event {
                     let from = packet.addr();
-                    match decode_payload(packet.payload()) {
-                        Ok(message) => {
-                            let new_peer = handle_incoming_message(
-                                socket_ref,
-                                message,
-                                from,
-                                &mut connected_peer,
-                                &mut session_dir,
-                                &mut incoming,
-                                &evt_tx,
-                                CHANNEL_ID,
-                            );
-                            if new_peer {
-                                if let Some(state) = punch_state.as_mut() {
-                                    if state.peer == from || state.peer.ip() == from.ip() {
-                                        state.peer = from;
-                                        punch_state = None;
+                    match packet_manager.process_incoming(packet.payload()) {
+                        Ok(Some(payload)) => match decode_payload(&payload) {
+                            Ok(message) => {
+                                let new_peer = handle_incoming_message(
+                                    socket_ref,
+                                    message,
+                                    from,
+                                    &mut connected_peer,
+                                    &mut session_dir,
+                                    &mut incoming,
+                                    &evt_tx,
+                                    CHANNEL_ID,
+                                    &mut packet_manager,
+                                );
+                                if new_peer {
+                                    if let Some(state) = punch_state.as_mut() {
+                                        if state.peer == from || state.peer.ip() == from.ip() {
+                                            state.peer = from;
+                                            punch_state = None;
+                                        }
                                     }
+                                    let _ = evt_tx.send(NetEvent::PeerConnected(from));
                                 }
-                                let _ = evt_tx.send(NetEvent::PeerConnected(from));
                             }
-                        }
+                            Err(err) => {
+                                log_decode_error(
+                                    &evt_tx,
+                                    packet.payload(),
+                                    err,
+                                    &mut stun_warning_logged,
+                                );
+                            }
+                        },
+                        Ok(None) => {}
                         Err(err) => {
-                            if looks_like_stun(packet.payload()) {
-                                if !stun_warning_logged {
-                                    let _ = evt_tx.send(NetEvent::Log(
-                                        "ignorado pacote STUN recebido apos detecao".to_string(),
-                                    ));
-                                    stun_warning_logged = true;
-                                }
-                            } else {
-                                let base64_preview = base64::engine::general_purpose::STANDARD
-                                    .encode(packet.payload());
-                                let preview = base64_preview.chars().take(48).collect::<String>();
-                                let _ = evt_tx.send(NetEvent::Log(format!(
-                                    "erro ao decodificar {err}; payload(base64)={preview}"
-                                )));
-                            }
+                            log_decode_error(
+                                &evt_tx,
+                                packet.payload(),
+                                err,
+                                &mut stun_warning_logged,
+                            );
                         }
                     }
                 }
@@ -398,6 +440,7 @@ fn handle_command(
     evt_tx: &Sender<NetEvent>,
     cmd_rx: &Receiver<NetCommand>,
     pending_cmds: &mut Vec<NetCommand>,
+    packet_manager: &mut PacketManager,
 ) -> io::Result<bool> {
     match cmd {
         NetCommand::ConnectPeer(addr) => {
@@ -421,6 +464,7 @@ fn handle_command(
                     pending_cmds,
                     CHANNEL_ID,
                     CHUNK_SIZE,
+                    packet_manager,
                 ) {
                     Ok(SendOutcome::Completed) => {}
                     Ok(SendOutcome::Canceled) => {
