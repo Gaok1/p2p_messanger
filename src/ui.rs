@@ -543,8 +543,8 @@ fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &Sender<Net
 fn handle_button_action(app: &mut AppState, action: ButtonAction, net_tx: &Sender<NetCommand>) {
     match action {
         ButtonAction::ConnectPeer => start_connect(app, net_tx),
-        ButtonAction::SelectIpv4 => app.select_mode(IpMode::Ipv4),
-        ButtonAction::SelectIpv6 => app.select_mode(IpMode::Ipv6),
+        ButtonAction::SelectIpv4 => handle_mode_change(app, IpMode::Ipv4, net_tx),
+        ButtonAction::SelectIpv6 => handle_mode_change(app, IpMode::Ipv6, net_tx),
         ButtonAction::CopyLocalIp => copy_local_ip(app),
         ButtonAction::CopyPublicEndpoint => copy_public_endpoint(app),
         ButtonAction::PastePeerIp => paste_peer_ip(app),
@@ -587,6 +587,41 @@ fn handle_button_action(app: &mut AppState, action: ButtonAction, net_tx: &Sende
             }
         }
         ButtonAction::Quit => app.should_quit = true,
+    }
+}
+
+fn handle_mode_change(app: &mut AppState, mode: IpMode, net_tx: &Sender<NetCommand>) {
+    if app.mode == mode {
+        return;
+    }
+
+    app.select_mode(mode);
+    app.connect_status = ConnectStatus::Idle;
+    app.peer_addr = None;
+    app.public_endpoint = None;
+    app.stun_status = None;
+
+    let new_bind = bind_for_mode(app.bind_addr, mode);
+    if new_bind != app.bind_addr {
+        app.bind_addr = new_bind;
+        app.local_ip = detect_local_ips(new_bind.ip());
+        if let Err(err) = net_tx.send(NetCommand::Rebind(new_bind)) {
+            app.push_log(format!("erro ao trocar modo {err}"));
+        }
+    }
+}
+
+fn bind_for_mode(current: SocketAddr, mode: IpMode) -> SocketAddr {
+    let port = current.port();
+    match mode {
+        IpMode::Ipv4 => match current.ip() {
+            IpAddr::V4(addr) => SocketAddr::new(IpAddr::V4(addr), port),
+            IpAddr::V6(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
+        },
+        IpMode::Ipv6 => match current.ip() {
+            IpAddr::V6(addr) => SocketAddr::new(IpAddr::V6(addr), port),
+            IpAddr::V4(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port),
+        },
     }
 }
 
@@ -1029,8 +1064,6 @@ fn render_connection_panel(
         ])
         .split(area);
 
-    let mut header_buttons = Vec::new();
-
     // Linha 1: escolha IPv4 / IPv6
     let row_modes = Layout::default()
         .direction(Direction::Horizontal)
@@ -1079,9 +1112,6 @@ fn render_connection_panel(
     frame.render_widget(ipv4_widget, ipv4_button.area);
     frame.render_widget(ipv6_widget, ipv6_button.area);
 
-    header_buttons.push(ipv4_button);
-    header_buttons.push(ipv6_button);
-
     // Linha 2: input + colar + conectar
     let row_top = Layout::default()
         .direction(Direction::Horizontal)
@@ -1110,7 +1140,7 @@ fn render_connection_panel(
     // Input
     let input_title = "ip do parceiro";
 
-    let placeholder = if app.bind_addr.is_ipv4() {
+    let placeholder = if matches!(app.mode, IpMode::Ipv4) {
         "ex: 192.0.2.10:5000"
     } else {
         "ex: [2001:db8::1]:5000"
@@ -1166,7 +1196,6 @@ fn render_connection_panel(
         .block(subtle_block(theme));
 
     frame.render_widget(paste_widget, paste_button.area);
-    header_buttons.push(paste_button.clone());
 
     // Conectar
     let connect_label = match &app.connect_status {
@@ -1194,7 +1223,6 @@ fn render_connection_panel(
         .block(subtle_block(theme));
 
     frame.render_widget(connect_widget, connect_button.area);
-    header_buttons.push(connect_button.clone());
 
     // Meu IP
     let local_text = app
@@ -1234,7 +1262,6 @@ fn render_connection_panel(
         .block(subtle_block(theme));
 
     frame.render_widget(copy_widget, copy_button.area);
-    header_buttons.push(copy_button.clone());
 
     // Endpoint publico (STUN)
     let public_text = match (app.current_public_endpoint(), app.stun_status.as_deref()) {
@@ -1273,7 +1300,6 @@ fn render_connection_panel(
         .block(subtle_block(theme));
 
     frame.render_widget(copy_public_widget, copy_public_button.area);
-    header_buttons.push(copy_public_button.clone());
 
     // Status (chips)
     let peer_text = app
@@ -1297,6 +1323,8 @@ fn render_connection_panel(
     frame.render_widget(status, row_status);
 
     let buttons = vec![
+        ipv4_button,
+        ipv6_button,
         connect_button,
         paste_button,
         copy_button,

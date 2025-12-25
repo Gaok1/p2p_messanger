@@ -218,6 +218,10 @@ pub(crate) fn handle_send_control(
         match cmd {
             NetCommand::CancelTransfers => return SendOutcome::Canceled,
             NetCommand::Shutdown => return SendOutcome::Shutdown,
+            NetCommand::Rebind(addr) => {
+                pending_cmds.push(NetCommand::Rebind(addr));
+                return SendOutcome::Canceled;
+            }
             other => pending_cmds.push(other),
         }
     }

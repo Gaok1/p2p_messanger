@@ -78,6 +78,7 @@ fn deserialize_message(bytes: &[u8]) -> bincode::Result<WireMessage> {
 /// Comandos enviados pela UI para a thread de rede.
 pub enum NetCommand {
     ConnectPeer(SocketAddr),
+    Rebind(SocketAddr),
     CancelTransfers,
     SendFiles(Vec<PathBuf>),
     Shutdown,
@@ -168,33 +169,17 @@ fn run_network(
     cmd_rx: Receiver<NetCommand>,
     evt_tx: Sender<NetEvent>,
 ) {
-    match stun::detect_public_endpoint(bind_addr) {
-        Ok(Some(endpoint)) => {
-            let _ = evt_tx.send(NetEvent::PublicEndpoint(endpoint));
-            let _ = evt_tx.send(NetEvent::Log(format!("endpoint publico {endpoint}")));
-        }
-        Ok(None) => {
-            let _ = evt_tx.send(NetEvent::Log("stun indisponivel".to_string()));
-        }
-        Err(err) => {
-            let _ = evt_tx.send(NetEvent::Log(format!("stun erro {err}")));
-        }
-    }
-
+    let mut bind_addr = bind_addr;
     let config = Config {
         heartbeat_interval: Some(Duration::from_secs(2)),
         ..Config::default()
     };
     log_transport_config(&config, &evt_tx);
-    let mut socket = match Socket::bind_with_config(bind_addr, config) {
-        Ok(socket) => socket,
-        Err(err) => {
-            let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir socket {err}")));
-            return;
-        }
+    run_stun_detection(bind_addr, &evt_tx);
+    let mut socket = match bind_socket(bind_addr, &config, &evt_tx) {
+        Some(socket) => Some(socket),
+        None => return,
     };
-
-    let _ = evt_tx.send(NetEvent::Log(format!("escutando {bind_addr}")));
 
     let mut punch_state = initial_peer.map(PunchState::new);
     if let Some(peer) = punch_state.as_ref().map(|state| state.peer) {
@@ -212,91 +197,144 @@ fn run_network(
         if !pending_cmds.is_empty() {
             let queued = pending_cmds.drain(..).collect::<Vec<_>>();
             for cmd in queued {
-                match handle_command(
-                    cmd,
-                    &mut connected_peer,
-                    &mut punch_state,
-                    &mut socket,
-                    &mut next_file_id,
-                    &evt_tx,
-                    &cmd_rx,
-                    &mut pending_cmds,
-                ) {
-                    Ok(true) => break 'outer,
-                    Ok(false) => {}
-                    Err(err) => {
-                        let _ = evt_tx.send(NetEvent::Log(format!("erro interno {err}")));
-                        break 'outer;
+                match cmd {
+                    NetCommand::Rebind(new_bind) => {
+                        if !apply_rebind(
+                            &mut socket,
+                            &mut bind_addr,
+                            new_bind,
+                            &config,
+                            &evt_tx,
+                        ) {
+                            break 'outer;
+                        }
+                        connected_peer = None;
+                        punch_state = None;
+                        session_dir = None;
+                        incoming.clear();
+                        next_file_id = 1;
+                        next_punch_nonce = 1;
+                    }
+                    other => {
+                        let Some(socket_ref) = socket.as_mut() else {
+                            break 'outer;
+                        };
+                        match handle_command(
+                            other,
+                            &mut connected_peer,
+                            &mut punch_state,
+                            socket_ref,
+                            &mut next_file_id,
+                            &evt_tx,
+                            &cmd_rx,
+                            &mut pending_cmds,
+                        ) {
+                            Ok(true) => break 'outer,
+                            Ok(false) => {}
+                            Err(err) => {
+                                let _ =
+                                    evt_tx.send(NetEvent::Log(format!("erro interno {err}")));
+                                break 'outer;
+                            }
+                        }
                     }
                 }
             }
         }
 
         while let Ok(cmd) = cmd_rx.try_recv() {
-            match handle_command(
-                cmd,
-                &mut connected_peer,
-                &mut punch_state,
-                &mut socket,
-                &mut next_file_id,
-                &evt_tx,
-                &cmd_rx,
-                &mut pending_cmds,
-            ) {
-                Ok(true) => break 'outer,
-                Ok(false) => {}
-                Err(err) => {
-                    let _ = evt_tx.send(NetEvent::Log(format!("erro interno {err}")));
-                    break 'outer;
+            match cmd {
+                NetCommand::Rebind(new_bind) => {
+                    if !apply_rebind(
+                        &mut socket,
+                        &mut bind_addr,
+                        new_bind,
+                        &config,
+                        &evt_tx,
+                    ) {
+                        break 'outer;
+                    }
+                    connected_peer = None;
+                    punch_state = None;
+                    session_dir = None;
+                    incoming.clear();
+                    next_file_id = 1;
+                    next_punch_nonce = 1;
                 }
-            }
-        }
-
-        if let Some(state) = punch_state.as_mut() {
-            if state.started.elapsed() >= PUNCH_TIMEOUT {
-                let peer = state.peer;
-                punch_state = None;
-                let _ = evt_tx.send(NetEvent::PeerTimeout(peer));
-            } else if state.last_sent.elapsed() >= PUNCH_INTERVAL {
-                handle_send_punch(&mut socket, state.peer, next_punch_nonce, &evt_tx);
-                next_punch_nonce = next_punch_nonce.wrapping_add(1);
-                state.last_sent = Instant::now();
-            }
-        }
-
-        while let Some(event) = socket.recv() {
-            if let SocketEvent::Packet(packet) = event {
-                let from = packet.addr();
-                match deserialize_message(packet.payload()) {
-                    Ok(message) => {
-                        let new_peer = handle_incoming_message(
-                            &mut socket,
-                            message,
-                            from,
-                            &mut connected_peer,
-                            &mut session_dir,
-                            &mut incoming,
-                            &evt_tx,
-                            CHANNEL_ID,
-                        );
-                        if new_peer {
-                            if let Some(state) = punch_state.as_mut() {
-                                if state.peer == from || state.peer.ip() == from.ip() {
-                                    state.peer = from;
-                                    punch_state = None;
-                                }
-                            }
-                            let _ = evt_tx.send(NetEvent::PeerConnected(from));
+                other => {
+                    let Some(socket_ref) = socket.as_mut() else {
+                        break 'outer;
+                    };
+                    match handle_command(
+                        other,
+                        &mut connected_peer,
+                        &mut punch_state,
+                        socket_ref,
+                        &mut next_file_id,
+                        &evt_tx,
+                        &cmd_rx,
+                        &mut pending_cmds,
+                    ) {
+                        Ok(true) => break 'outer,
+                        Ok(false) => {}
+                        Err(err) => {
+                            let _ = evt_tx.send(NetEvent::Log(format!("erro interno {err}")));
+                            break 'outer;
                         }
                     }
-                    Err(err) => {
-                        let _ = evt_tx.send(NetEvent::Log(format!("erro ao decodificar {err}")));
-                    }
                 }
             }
         }
 
-        socket.manual_poll(Instant::now());
+        if let Some(socket_ref) = socket.as_mut() {
+            if let Some(state) = punch_state.as_mut() {
+                if state.started.elapsed() >= PUNCH_TIMEOUT {
+                    let peer = state.peer;
+                    punch_state = None;
+                    let _ = evt_tx.send(NetEvent::PeerTimeout(peer));
+                } else if state.last_sent.elapsed() >= PUNCH_INTERVAL {
+                    handle_send_punch(socket_ref, state.peer, next_punch_nonce, &evt_tx);
+                    next_punch_nonce = next_punch_nonce.wrapping_add(1);
+                    state.last_sent = Instant::now();
+                }
+            }
+
+            while let Some(event) = socket_ref.recv() {
+                if let SocketEvent::Packet(packet) = event {
+                    let from = packet.addr();
+                    match deserialize_message(packet.payload()) {
+                        Ok(message) => {
+                            let new_peer = handle_incoming_message(
+                                socket_ref,
+                                message,
+                                from,
+                                &mut connected_peer,
+                                &mut session_dir,
+                                &mut incoming,
+                                &evt_tx,
+                                CHANNEL_ID,
+                            );
+                            if new_peer {
+                                if let Some(state) = punch_state.as_mut() {
+                                    if state.peer == from || state.peer.ip() == from.ip() {
+                                        state.peer = from;
+                                        punch_state = None;
+                                    }
+                                }
+                                let _ = evt_tx.send(NetEvent::PeerConnected(from));
+                            }
+                        }
+                        Err(err) => {
+                            let _ = evt_tx
+                                .send(NetEvent::Log(format!("erro ao decodificar {err}")));
+                        }
+                    }
+                }
+            }
+
+            socket_ref.manual_poll(Instant::now());
+        }
+
         thread::sleep(Duration::from_millis(10));
     }
 }
@@ -317,6 +355,7 @@ fn handle_command(
             *punch_state = Some(PunchState::new(addr));
             let _ = evt_tx.send(NetEvent::PeerConnecting(addr));
         }
+        NetCommand::Rebind(_) => {}
         NetCommand::CancelTransfers => {
             let _ = evt_tx.send(NetEvent::Log("cancelamento solicitado".to_string()));
         }
@@ -349,6 +388,61 @@ fn handle_command(
         NetCommand::Shutdown => return Ok(true),
     }
     Ok(false)
+}
+
+fn run_stun_detection(bind_addr: SocketAddr, evt_tx: &Sender<NetEvent>) {
+    match stun::detect_public_endpoint(bind_addr) {
+        Ok(Some(endpoint)) => {
+            let _ = evt_tx.send(NetEvent::PublicEndpoint(endpoint));
+            let _ = evt_tx.send(NetEvent::Log(format!("endpoint publico {endpoint}")));
+        }
+        Ok(None) => {
+            let _ = evt_tx.send(NetEvent::Log("stun indisponivel".to_string()));
+        }
+        Err(err) => {
+            let _ = evt_tx.send(NetEvent::Log(format!("stun erro {err}")));
+        }
+    }
+}
+
+fn bind_socket(
+    bind_addr: SocketAddr,
+    config: &Config,
+    evt_tx: &Sender<NetEvent>,
+) -> Option<Socket> {
+    match Socket::bind_with_config(bind_addr, config.clone()) {
+        Ok(socket) => {
+            let _ = evt_tx.send(NetEvent::Log(format!("escutando {bind_addr}")));
+            Some(socket)
+        }
+        Err(err) => {
+            let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir socket {err}")));
+            None
+        }
+    }
+}
+
+fn apply_rebind(
+    socket: &mut Option<Socket>,
+    bind_addr: &mut SocketAddr,
+    new_bind: SocketAddr,
+    config: &Config,
+    evt_tx: &Sender<NetEvent>,
+) -> bool {
+    if new_bind == *bind_addr {
+        return true;
+    }
+
+    let _ = evt_tx.send(NetEvent::Log(format!("reconfigurando bind para {new_bind}")));
+    *socket = None;
+    run_stun_detection(new_bind, evt_tx);
+    let new_socket = match bind_socket(new_bind, config, evt_tx) {
+        Some(socket) => socket,
+        None => return false,
+    };
+    *socket = Some(new_socket);
+    *bind_addr = new_bind;
+    true
 }
 
 #[cfg(test)]

@@ -1,0 +1,50 @@
+copiado 192.168.100.141:5000
+ip colado
+conectando 192.168.100.141:5000
+tempo esgotado 192.168.100.141:5000
+copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:5000
+ip colado
+conectando [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:5000
+conectado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:5000
+diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-24_22-24-22
+copiado [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+ip colado
+conectando [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+conectado [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+conectando [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+conectado [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+conectando [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+conectado [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+conectando [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+conectado [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+conectando [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+conectado [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+copiado 192.168.100.141:5000
+ip colado
+conectando 192.168.100.141:5000
+tempo esgotado 192.168.100.141:5000
+controle de trafego: confiavel/ordenado no canal 0, max_packets_in_flight=512, fragment_size=1024, max_packet_size=16384, heartbeat=2s
+dados de arquivo: chunks de 1024 bytes com etiquetagem interna do laminar
+endpoint publico [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+endpoint publico [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+escutando [::]:5000
+reconfigurando bind para 0.0.0.0:5000
+endpoint publico 152.237.164.251:58200
+endpoint publico 152.237.164.251:58200
+escutando 0.0.0.0:5000
+reconfigurando bind para [::]:5000
+endpoint publico [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+endpoint publico [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+escutando [::]:5000
+reconfigurando bind para 0.0.0.0:5000
+endpoint publico 152.237.164.251:58200
+endpoint publico 152.237.164.251:58200
+escutando 0.0.0.0:5000
+reconfigurando bind para [::]:5000
+endpoint publico [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+endpoint publico [2804:d45:9a05:f400:dc04:27f6:2343:a5e4]:5000
+escutando [::]:5000
+reconfigurando bind para 0.0.0.0:5000
+endpoint publico 152.237.164.251:58200
+endpoint publico 152.237.164.251:58200
+escutando 0.0.0.0:5000
