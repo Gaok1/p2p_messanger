@@ -6,13 +6,13 @@ use std::{
     path::Path,
     path::PathBuf,
     sync::mpsc::{Receiver, Sender},
-    thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use chrono::Local;
-use laminar::{ErrorKind, Packet, Socket};
+use laminar::{Packet, Socket};
 
+use super::packet_manager::PacketManager;
 use super::{NetCommand, NetEvent, WireMessage, serialize_message};
 
 /// Representa um arquivo que está chegando do par.
@@ -41,6 +41,7 @@ pub(crate) fn handle_incoming_message(
     incoming: &mut HashMap<u64, IncomingFile>,
     evt_tx: &Sender<NetEvent>,
     channel_id: u8,
+    packet_manager: &mut PacketManager,
 ) -> bool {
     let mut new_peer = false;
     if peer_addr.is_none() {
@@ -63,6 +64,7 @@ pub(crate) fn handle_incoming_message(
                 &WireMessage::Hello { version: 1 },
                 evt_tx,
                 channel_id,
+                packet_manager,
             );
         }
         WireMessage::Cancel { file_id } => {
@@ -176,7 +178,9 @@ pub(crate) fn handle_send_punch(
     peer: SocketAddr,
     nonce: u64,
     evt_tx: &Sender<NetEvent>,
+    packet_manager: &mut PacketManager,
 ) {
+    let _ = packet_manager; // o punch continua usando pacote pequeno e não fragmentado
     match serialize_message(&WireMessage::Punch { nonce }) {
         Ok(payload) => {
             if let Err(err) = socket.send(Packet::unreliable(peer, payload)) {
@@ -196,9 +200,10 @@ pub(crate) fn send_message(
     message: &WireMessage,
     evt_tx: &Sender<NetEvent>,
     channel_id: u8,
+    packet_manager: &mut PacketManager,
 ) {
     match serialize_message(message) {
-        Ok(payload) => match send_with_backpressure(socket, peer, payload, channel_id) {
+        Ok(payload) => match packet_manager.send(socket, peer, payload, channel_id) {
             Ok(()) => {}
             Err(err) => {
                 let _ = evt_tx.send(NetEvent::Log(format!("erro ao enviar {err}")));
@@ -206,33 +211,6 @@ pub(crate) fn send_message(
         },
         Err(err) => {
             let _ = evt_tx.send(NetEvent::Log(format!("erro ao serializar {err}")));
-        }
-    }
-}
-
-fn send_with_backpressure(
-    socket: &mut Socket,
-    peer: SocketAddr,
-    payload: Vec<u8>,
-    channel_id: u8,
-) -> laminar::Result<()> {
-    const MAX_RETRIES: usize = 50;
-    const BACKOFF: Duration = Duration::from_millis(5);
-
-    let packet = Packet::reliable_ordered(peer, payload, Some(channel_id));
-    let mut retries = 0;
-
-    loop {
-        match socket.send(packet.clone()) {
-            Ok(()) => return Ok(()),
-            Err(ErrorKind::IOError(err))
-                if err.kind() == io::ErrorKind::WouldBlock && retries < MAX_RETRIES =>
-            {
-                retries += 1;
-                socket.manual_poll(Instant::now());
-                thread::sleep(BACKOFF);
-            }
-            Err(err) => return Err(err),
         }
     }
 }
@@ -267,6 +245,7 @@ pub(crate) fn send_files(
     pending_cmds: &mut Vec<NetCommand>,
     channel_id: u8,
     chunk_size: usize,
+    packet_manager: &mut PacketManager,
 ) -> io::Result<SendOutcome> {
     send_message(
         socket,
@@ -274,6 +253,7 @@ pub(crate) fn send_files(
         &WireMessage::Hello { version: 1 },
         evt_tx,
         channel_id,
+        packet_manager,
     );
 
     for path in files {
@@ -304,6 +284,7 @@ pub(crate) fn send_files(
             },
             evt_tx,
             channel_id,
+            packet_manager,
         );
         let _ = evt_tx.send(NetEvent::SendStarted {
             file_id,
@@ -328,6 +309,7 @@ pub(crate) fn send_files(
                 },
                 evt_tx,
                 channel_id,
+                packet_manager,
             );
             sent_bytes += read as u64;
             let _ = evt_tx.send(NetEvent::SendProgress {
@@ -339,7 +321,7 @@ pub(crate) fn send_files(
 
             match handle_send_control(cmd_rx, pending_cmds) {
                 SendOutcome::Canceled => {
-                    send_cancel(socket, peer, file_id, evt_tx, channel_id);
+                    send_cancel(socket, peer, file_id, evt_tx, channel_id, packet_manager);
                     let _ = evt_tx.send(NetEvent::SendCanceled {
                         file_id,
                         path: path.clone(),
@@ -347,7 +329,7 @@ pub(crate) fn send_files(
                     return Ok(SendOutcome::Canceled);
                 }
                 SendOutcome::Shutdown => {
-                    send_cancel(socket, peer, file_id, evt_tx, channel_id);
+                    send_cancel(socket, peer, file_id, evt_tx, channel_id, packet_manager);
                     return Ok(SendOutcome::Shutdown);
                 }
                 SendOutcome::Completed => {}
@@ -360,6 +342,7 @@ pub(crate) fn send_files(
             &WireMessage::FileDone { file_id },
             evt_tx,
             channel_id,
+            packet_manager,
         );
         let _ = evt_tx.send(NetEvent::FileSent {
             file_id,
@@ -376,6 +359,7 @@ fn send_cancel(
     file_id: u64,
     evt_tx: &Sender<NetEvent>,
     channel_id: u8,
+    packet_manager: &mut PacketManager,
 ) {
     send_message(
         socket,
@@ -383,5 +367,6 @@ fn send_cancel(
         &WireMessage::Cancel { file_id },
         evt_tx,
         channel_id,
+        packet_manager,
     );
 }
