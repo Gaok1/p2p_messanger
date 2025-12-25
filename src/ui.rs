@@ -279,8 +279,15 @@ impl AppState {
     }
 
     fn select_mode(&mut self, mode: IpMode) {
-        if self.mode_supported(mode) {
+        if self.mode != mode {
             self.mode = mode;
+            if !self.mode_supported(mode) {
+                let label = match mode {
+                    IpMode::Ipv4 => "IPv4",
+                    IpMode::Ipv6 => "IPv6",
+                };
+                self.push_log(format!("modo {label} sem ip local"));
+            }
             self.needs_clear = true;
         }
     }
@@ -770,20 +777,27 @@ fn button_style(theme: Theme, accent: Color, hover: bool, enabled: bool) -> Styl
 }
 
 fn mode_button_style(theme: Theme, active: bool, hover: bool, enabled: bool) -> Style {
-    if !enabled {
-        return Style::default()
-            .fg(theme.muted)
-            .bg(theme.panel)
-            .add_modifier(Modifier::DIM);
+    if active {
+        return if enabled {
+            Style::default()
+                .fg(theme.bg)
+                .bg(theme.ok)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(theme.bg)
+                .bg(theme.warn)
+                .add_modifier(Modifier::BOLD)
+        };
     }
 
-    if active {
-        Style::default()
-            .fg(theme.bg)
-            .bg(theme.ok)
-            .add_modifier(Modifier::BOLD)
-    } else {
+    if enabled {
         button_style(theme, theme.info, hover, enabled)
+    } else {
+        Style::default()
+            .fg(theme.muted)
+            .bg(theme.panel)
+            .add_modifier(Modifier::DIM)
     }
 }
 
