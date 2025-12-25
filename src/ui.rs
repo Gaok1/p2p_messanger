@@ -1,7 +1,7 @@
 use std::{
     fs::OpenOptions,
     io::{self, Write},
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     sync::mpsc::{Receiver, Sender},
     time::Duration,
@@ -51,6 +51,29 @@ impl IpMode {
                     IpMode::Ipv6
                 }
             }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct LocalIps {
+    v4: Option<Ipv4Addr>,
+    v6: Option<Ipv6Addr>,
+}
+
+impl LocalIps {
+    fn has_v4(&self) -> bool {
+        self.v4.is_some()
+    }
+
+    fn has_v6(&self) -> bool {
+        self.v6.is_some()
+    }
+
+    fn current_for_mode(&self, mode: IpMode) -> Option<IpAddr> {
+        match mode {
+            IpMode::Ipv4 => self.v4.map(IpAddr::V4),
+            IpMode::Ipv6 => self.v6.map(IpAddr::V6),
         }
     }
 }
@@ -188,7 +211,7 @@ pub struct AppState {
     peer_focus: bool,
     mode: IpMode,
     connect_status: ConnectStatus,
-    local_ip: Option<IpAddr>,
+    local_ip: LocalIps,
     public_endpoint: Option<SocketAddr>,
     stun_status: Option<String>,
     selected: Vec<OutgoingEntry>,
@@ -207,16 +230,13 @@ impl AppState {
             Some(addr) => (None, addr.to_string(), ConnectStatus::Connecting(addr)),
             None => (None, String::new(), ConnectStatus::Idle),
         };
-        let local_ip = detect_local_ip(bind_addr.ip());
+        let local_ip = detect_local_ips(bind_addr.ip());
         let mode = if bind_addr.is_ipv4() {
             IpMode::Ipv4
         } else {
             IpMode::Ipv6
         };
-        let mode = mode.fallback(
-            matches!(local_ip, Some(IpAddr::V4(_))),
-            matches!(local_ip, Some(IpAddr::V6(_))),
-        );
+        let mode = mode.fallback(local_ip.has_v4(), local_ip.has_v6());
         Self {
             bind_addr,
             peer_addr,
@@ -253,8 +273,8 @@ impl AppState {
 
     fn mode_supported(&self, mode: IpMode) -> bool {
         match mode {
-            IpMode::Ipv4 => matches!(self.local_ip, Some(IpAddr::V4(_))),
-            IpMode::Ipv6 => matches!(self.local_ip, Some(IpAddr::V6(_))),
+            IpMode::Ipv4 => self.local_ip.has_v4(),
+            IpMode::Ipv6 => self.local_ip.has_v6(),
         }
     }
 
@@ -266,11 +286,7 @@ impl AppState {
     }
 
     fn current_local_ip(&self) -> Option<IpAddr> {
-        self.local_ip.and_then(|addr| match (self.mode, addr) {
-            (IpMode::Ipv4, IpAddr::V4(_)) => Some(addr),
-            (IpMode::Ipv6, IpAddr::V6(_)) => Some(addr),
-            _ => None,
-        })
+        self.local_ip.current_for_mode(self.mode)
     }
 
     fn current_public_endpoint(&self) -> Option<SocketAddr> {
@@ -1371,12 +1387,12 @@ fn pick_files_dialog() -> Option<Vec<PathBuf>> {
     files
 }
 
-fn detect_local_ip(preferred: IpAddr) -> Option<IpAddr> {
+fn detect_local_ips(preferred: IpAddr) -> LocalIps {
     let interfaces = match get_if_addrs() {
         Ok(interfaces) => interfaces,
         Err(err) => {
             eprintln!("failed to list interfaces: {err}");
-            return None;
+            return LocalIps::default();
         }
     };
 
@@ -1416,9 +1432,20 @@ fn detect_local_ip(preferred: IpAddr) -> Option<IpAddr> {
         }
     }
 
-    match preferred {
-        IpAddr::V4(_) => best_v4.or(best_v6_global).or(best_v6_local),
-        IpAddr::V6(_) => best_v6_global.or(best_v6_local).or(best_v4),
+    let v6 = match preferred {
+        IpAddr::V4(_) => best_v6_global.or(best_v6_local),
+        IpAddr::V6(_) => best_v6_global.or(best_v6_local),
+    };
+
+    LocalIps {
+        v4: best_v4.and_then(|ip| match ip {
+            IpAddr::V4(v4) => Some(v4),
+            _ => None,
+        }),
+        v6: v6.and_then(|ip| match ip {
+            IpAddr::V6(v6) => Some(v6),
+            _ => None,
+        }),
     }
 }
 
