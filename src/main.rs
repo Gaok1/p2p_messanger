@@ -3,6 +3,8 @@ mod ui;
 
 use std::net::SocketAddr;
 
+use get_if_addrs::{IfAddr, get_if_addrs};
+
 const DEFAULT_BIND_IPV6: &str = "[::]:0";
 const DEFAULT_BIND_IPV4: &str = "0.0.0.0:0";
 
@@ -55,7 +57,32 @@ fn default_bind_addr() -> SocketAddr {
     std::env::var("PASTA_P2P_BIND")
         .ok()
         .and_then(|addr| addr.parse().ok())
-        .or_else(|| DEFAULT_BIND_IPV6.parse().ok())
-        .or_else(|| DEFAULT_BIND_IPV4.parse().ok())
+        .or_else(|| {
+            let default = if has_global_ipv6() {
+                DEFAULT_BIND_IPV6
+            } else {
+                DEFAULT_BIND_IPV4
+            };
+            default.parse().ok()
+        })
         .unwrap_or_else(|| "0.0.0.0:0".parse().expect("fallback de bind valido"))
+}
+
+fn has_global_ipv6() -> bool {
+    let interfaces = match get_if_addrs() {
+        Ok(interfaces) => interfaces,
+        Err(_) => return false,
+    };
+
+    interfaces.iter().any(|iface| match &iface.addr {
+        IfAddr::V6(v6) => {
+            let addr = v6.ip;
+            !(addr.is_loopback()
+                || addr.is_multicast()
+                || addr.is_unspecified()
+                || addr.is_unicast_link_local()
+                || addr.is_unique_local())
+        }
+        _ => false,
+    })
 }
