@@ -158,6 +158,7 @@ enum ButtonAction {
     ConnectPeer,
     SelectIpv4,
     SelectIpv6,
+    ToggleMouseMode,
     CopyLocalIp,
     CopyPublicEndpoint,
     PastePeerIp,
@@ -216,6 +217,11 @@ pub struct AppState {
     local_ip: LocalIps,
     public_endpoint: Option<SocketAddr>,
     stun_status: Option<String>,
+    mouse_capture_enabled: bool,
+    mouse_capture_request: Option<bool>,
+    local_panel_area: Rect,
+    public_panel_area: Rect,
+    received_click_targets: Vec<(Rect, PathBuf)>,
     selected: Vec<OutgoingEntry>,
     received: Vec<IncomingEntry>,
     logs: Vec<String>,
@@ -252,6 +258,11 @@ impl AppState {
             local_ip,
             public_endpoint: None,
             stun_status: None,
+            mouse_capture_enabled: true,
+            mouse_capture_request: None,
+            local_panel_area: Rect::default(),
+            public_panel_area: Rect::default(),
+            received_click_targets: Vec::new(),
             selected: Vec::new(),
             received: Vec::new(),
             logs: Vec::new(),
@@ -399,6 +410,9 @@ pub fn run_app(
                             KeyCode::PageDown => app.scroll_logs_down(app.logs_view_height.max(1)),
                             KeyCode::Home => app.scroll_logs_top(),
                             KeyCode::End => app.scroll_logs_bottom(),
+                            KeyCode::Char('m') => {
+                                app.mouse_capture_request = Some(!app.mouse_capture_enabled);
+                            }
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             _ => {}
                         }
@@ -409,11 +423,33 @@ pub fn run_app(
             }
         }
 
+        if let Some(enabled) = app.mouse_capture_request.take() {
+            set_mouse_capture(terminal, enabled)?;
+            app.mouse_capture_enabled = enabled;
+            if enabled {
+                app.push_log("mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)");
+            } else {
+                app.push_log("mouse livre: selecione o texto no terminal (pressione 'm' para voltar)");
+            }
+        }
+
         if app.should_quit {
             break;
         }
     }
 
+    Ok(())
+}
+
+fn set_mouse_capture(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    enabled: bool,
+) -> io::Result<()> {
+    if enabled {
+        execute!(terminal.backend_mut(), EnableMouseCapture)?;
+    } else {
+        execute!(terminal.backend_mut(), DisableMouseCapture)?;
+    }
     Ok(())
 }
 
@@ -570,6 +606,10 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
 }
 
 fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
+    if !app.mouse_capture_enabled {
+        return;
+    }
+
     match mouse.kind {
         MouseEventKind::Moved => {
             app.last_mouse = Some((mouse.column, mouse.row));
@@ -592,6 +632,25 @@ fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &tokio_mpsc
             }
             app.peer_focus = false;
 
+            if point_in_rect(mouse.column, mouse.row, app.local_panel_area)
+                || point_in_rect(mouse.column, mouse.row, app.public_panel_area)
+            {
+                app.mouse_capture_request = Some(false);
+                return;
+            }
+
+            if let Some((_, path)) = app
+                .received_click_targets
+                .iter()
+                .find(|(area, _)| point_in_rect(mouse.column, mouse.row, *area))
+            {
+                match open_path_in_default_app(path.as_path()) {
+                    Ok(()) => app.push_log(format!("abrindo {}", path.display())),
+                    Err(err) => app.push_log(format!("erro ao abrir {}: {err}", path.display())),
+                }
+                return;
+            }
+
             if let Some(action) = app
                 .buttons
                 .iter()
@@ -610,11 +669,14 @@ fn handle_button_action(app: &mut AppState, action: ButtonAction, net_tx: &tokio
         ButtonAction::ConnectPeer => start_connect(app, net_tx),
         ButtonAction::SelectIpv4 => handle_mode_change(app, IpMode::Ipv4, net_tx),
         ButtonAction::SelectIpv6 => handle_mode_change(app, IpMode::Ipv6, net_tx),
+        ButtonAction::ToggleMouseMode => {
+            app.mouse_capture_request = Some(!app.mouse_capture_enabled);
+        }
         ButtonAction::CopyLocalIp => copy_local_ip(app),
         ButtonAction::CopyPublicEndpoint => copy_public_endpoint(app),
         ButtonAction::PastePeerIp => paste_peer_ip(app),
         ButtonAction::AddFiles => {
-            if let Some(files) = pick_files_dialog() {
+            if let Some(files) = pick_files_dialog(app.mouse_capture_enabled) {
                 for path in files {
                     app.selected.push(OutgoingEntry {
                         path,
@@ -1020,10 +1082,14 @@ fn render_incoming_item(theme: Theme, entry: &IncomingEntry) -> ListItem<'static
         percent
     );
     let info_span = Span::styled(info, Style::default().fg(theme.muted));
-    let path = Span::styled(
-        entry.path.display().to_string(),
-        Style::default().fg(theme.text),
-    );
+    let path_style = if matches!(entry.status, IncomingStatus::Done) {
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    } else {
+        Style::default().fg(theme.text)
+    };
+    let path = Span::styled(entry.path.display().to_string(), path_style);
 
     ListItem::new(Line::from(vec![status, bar_span, info_span, path]))
 }
@@ -1031,7 +1097,7 @@ fn render_incoming_item(theme: Theme, entry: &IncomingEntry) -> ListItem<'static
 fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     let theme = Theme::default_dark();
 
-    // “pinta” o fundo inteiro (evita ficar com blocos soltos)
+    // "pinta" o fundo inteiro (evita ficar com blocos soltos)
     frame.render_widget(root_bg(theme), frame.size());
 
     let chunks = Layout::default()
@@ -1081,6 +1147,7 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         .block(block_with_title(theme, "recebendo (entrada)"))
         .style(Style::default().bg(theme.panel));
 
+    app.received_click_targets = build_received_click_targets(right[0], &app.received);
     frame.render_widget(received, right[0]);
 
     app.logs_area = right[1];
@@ -1108,7 +1175,7 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
 fn render_connection_panel(
     frame: &mut Frame,
     area: Rect,
-    app: &AppState,
+    app: &mut AppState,
     hover: Option<(u16, u16)>,
     theme: Theme,
 ) -> (Rect, Vec<Button>) {
@@ -1146,6 +1213,21 @@ fn render_connection_panel(
         action: ButtonAction::SelectIpv6,
     };
 
+    let mode_status_area = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(12)])
+        .split(row_modes[2])[1];
+
+    let mouse_mode_button = Button {
+        label: if app.mouse_capture_enabled {
+            "Copy[M]".to_string()
+        } else {
+            "Static[M]".to_string()
+        },
+        area: mode_status_area,
+        action: ButtonAction::ToggleMouseMode,
+    };
+
     let ipv4_hover = hover
         .map(|(x, y)| point_in_rect(x, y, ipv4_button.area))
         .unwrap_or(false);
@@ -1159,6 +1241,12 @@ fn render_connection_panel(
     let ipv4_style = mode_button_style(theme, app.mode == IpMode::Ipv4, ipv4_hover, ipv4_enabled);
     let ipv6_style = mode_button_style(theme, app.mode == IpMode::Ipv6, ipv6_hover, ipv6_enabled);
 
+    let mouse_mode_hover = hover
+        .map(|(x, y)| point_in_rect(x, y, mouse_mode_button.area))
+        .unwrap_or(false);
+    let mouse_mode_active = !app.mouse_capture_enabled;
+    let mouse_mode_style = mode_button_style(theme, mouse_mode_active, mouse_mode_hover, true);
+
     let ipv4_widget = Paragraph::new(ipv4_button.label.as_str())
         .alignment(Alignment::Center)
         .style(ipv4_style)
@@ -1167,9 +1255,14 @@ fn render_connection_panel(
         .alignment(Alignment::Center)
         .style(ipv6_style)
         .block(subtle_block(theme));
+    let mouse_mode_widget = Paragraph::new(mouse_mode_button.label.as_str())
+        .alignment(Alignment::Center)
+        .style(mouse_mode_style)
+        .block(subtle_block(theme));
 
     frame.render_widget(ipv4_widget, ipv4_button.area);
     frame.render_widget(ipv6_widget, ipv6_button.area);
+    frame.render_widget(mouse_mode_widget, mouse_mode_button.area);
 
     // Linha 2: input + colar + conectar
     let row_top = Layout::default()
@@ -1299,6 +1392,7 @@ fn render_connection_panel(
 
     let local_panel = Paragraph::new(local_line).block(block_with_title(theme, "local"));
     frame.render_widget(local_panel, row_mid[0]);
+    app.local_panel_area = row_mid[0];
 
     // Copiar
     let copy_button = Button {
@@ -1339,6 +1433,7 @@ fn render_connection_panel(
 
     let public_panel = Paragraph::new(public_line).block(block_with_title(theme, "publico"));
     frame.render_widget(public_panel, row_public[0]);
+    app.public_panel_area = row_public[0];
 
     let copy_public_button = Button {
         label: "Copiar pub".to_string(),
@@ -1384,6 +1479,7 @@ fn render_connection_panel(
     let buttons = vec![
         ipv4_button,
         ipv6_button,
+        mouse_mode_button,
         connect_button,
         paste_button,
         copy_button,
@@ -1478,12 +1574,90 @@ fn point_in_rect(x: u16, y: u16, rect: Rect) -> bool {
     x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
 }
 
-fn pick_files_dialog() -> Option<Vec<PathBuf>> {
+fn inner_block_area(area: Rect) -> Rect {
+    if area.width <= 2 || area.height <= 2 {
+        return Rect::default();
+    }
+    Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width - 2,
+        height: area.height - 2,
+    }
+}
+
+fn incoming_item_rect(list_area: Rect, idx: usize) -> Rect {
+    let inner = inner_block_area(list_area);
+    if inner.height == 0 || idx >= inner.height as usize {
+        return Rect::default();
+    }
+    Rect {
+        x: inner.x,
+        y: inner.y + idx as u16,
+        width: inner.width,
+        height: 1,
+    }
+}
+
+fn build_received_click_targets(
+    list_area: Rect,
+    received: &[IncomingEntry],
+) -> Vec<(Rect, PathBuf)> {
+    let inner = inner_block_area(list_area);
+    if inner.height == 0 || inner.width == 0 {
+        return Vec::new();
+    }
+
+    let visible = received.iter().rev().take(20).collect::<Vec<_>>();
+    let max_rows = inner.height as usize;
+
+    let mut out = Vec::new();
+    for (idx, entry) in visible.into_iter().enumerate().take(max_rows) {
+        if !matches!(entry.status, IncomingStatus::Done) {
+            continue;
+        }
+        if !entry.path.exists() {
+            continue;
+        }
+        out.push((incoming_item_rect(list_area, idx), entry.path.clone()));
+    }
+    out
+}
+
+fn open_path_in_default_app(path: &std::path::Path) -> io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let path = path.to_string_lossy();
+        let quoted = format!("\"{path}\"");
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &quoted])
+            .spawn()?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(path).spawn()?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open").arg(path).spawn()?;
+        return Ok(());
+    }
+}
+
+fn pick_files_dialog(mouse_capture_enabled: bool) -> Option<Vec<PathBuf>> {
     let _ = disable_raw_mode();
     let mut stdout = io::stdout();
     let _ = execute!(stdout, LeaveAlternateScreen, DisableMouseCapture);
     let files = rfd::FileDialog::new().pick_files();
-    let _ = execute!(stdout, EnterAlternateScreen, EnableMouseCapture);
+    if mouse_capture_enabled {
+        let _ = execute!(stdout, EnterAlternateScreen, EnableMouseCapture);
+    } else {
+        let _ = execute!(stdout, EnterAlternateScreen, DisableMouseCapture);
+    }
     let _ = enable_raw_mode();
     files
 }

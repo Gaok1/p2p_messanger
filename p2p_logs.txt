@@ -31,3 +31,79 @@ reconfigurando bind para [::]:55149
 endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55149
 reconfigurando bind para 0.0.0.0:55149
 endpoint publico 152.237.164.251:57683
+transporte QUIC: streams confiaveis com TLS 1.3
+dados de arquivo: streams unidirecionais com chunks de 1024 bytes
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:51864
+ip colado
+endereco do parceiro invalido
+reconfigurando bind para 0.0.0.0:51864
+endpoint publico 152.237.164.251:60640
+ip colado
+endereco do parceiro invalido
+ip colado
+conectando 187.73.0.200:44288
+copiado 152.237.164.251:60640
+erro ao conectar timed out
+conectado 187.73.0.200:44288
+conectado 187.73.0.200:44288
+erro ao aceitar detected an error with protocol compliance that was not covered by more specific error codes: authentication failed
+enviado C:\Users\gaok1\Downloads\ChatGPT Image 25 de dez. de 2025, 09_22_58.png
+enviado C:\Users\gaok1\Downloads\ChatGPT Image 24 de dez. de 2025, 22_48_40.png
+transporte QUIC: streams confiaveis com TLS 1.3
+dados de arquivo: streams unidirecionais com chunks de 1024 bytes
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55872
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+copiado [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55872
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+reconfigurando bind para 0.0.0.0:55872
+endpoint publico 152.237.164.251:57848
+reconfigurando bind para [::]:55872
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55872
+reconfigurando bind para 0.0.0.0:55872
+endpoint publico 152.237.164.251:57848
+reconfigurando bind para [::]:55872
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55872
+reconfigurando bind para 0.0.0.0:55872
+endpoint publico 152.237.164.251:57848
+reconfigurando bind para [::]:55872
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55872
+reconfigurando bind para 0.0.0.0:55872
+endpoint publico 152.237.164.251:57848
+transporte QUIC: streams confiaveis com TLS 1.3
+dados de arquivo: streams unidirecionais com chunks de 1024 bytes
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:61104
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+reconfigurando bind para 0.0.0.0:61104
+endpoint publico 152.237.164.251:58718
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+cancelamento solicitado
+cancelamento solicitado
+cancelamento solicitado
+transporte QUIC: streams confiaveis com TLS 1.3
+dados de arquivo: streams unidirecionais com chunks de 1024 bytes
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:54225
+cancelamento solicitado
+cancelamento solicitado
+transporte QUIC: streams confiaveis com TLS 1.3
+dados de arquivo: streams unidirecionais com chunks de 1024 bytes
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:53464
+cancelamento solicitado
+cancelamento solicitado
