@@ -13,17 +13,14 @@ use std::{
 const STUN_SERVERS_V4: [&str; 10] = [
     // Cloudflare
     "stun.cloudflare.com:3478",
-
     // Twilio (STUN global)
     "global.stun.twilio.com:3478",
-
     // Google (WebRTC)
     "stun.l.google.com:19302",
     "stun1.l.google.com:19302",
     "stun2.l.google.com:19302",
     "stun3.l.google.com:19302",
     "stun4.l.google.com:19302",
-
     // Outros
     "stun.sipgate.net:3478",
     "stun.nextcloud.com:443",
@@ -38,14 +35,12 @@ const STUN_SERVERS_V4: [&str; 10] = [
 const STUN_SERVERS_V6: [&str; 7] = [
     // Cloudflare
     "stun.cloudflare.com:3478",
-
     // Google (WebRTC)
     "stun.l.google.com:19302",
     "stun1.l.google.com:19302",
     "stun2.l.google.com:19302",
     "stun3.l.google.com:19302",
     "stun4.l.google.com:19302",
-
     // Outros
     "stun.nextcloud.com:443",
     // Removidos: stun.ekiga.net / stunserver.org / stun.voxgratia.org (NXDOMAIN em 2025-12)
@@ -107,7 +102,10 @@ fn detect_public_endpoint_on_socket_inner(
     mut trace: Option<&mut dyn FnMut(String)>,
 ) -> Result<Option<SocketAddr>, String> {
     if stun_disabled() {
-        stun_trace(&mut trace, format!("stun trace: disabled (bind={bind_addr})"));
+        stun_trace(
+            &mut trace,
+            format!("stun trace: disabled (bind={bind_addr})"),
+        );
         return Ok(None);
     }
 
@@ -127,7 +125,10 @@ fn detect_public_endpoint_on_socket_inner(
     if servers.is_empty() {
         return Err("STUN sem servidores".to_string());
     }
-    stun_trace(&mut trace, format!("stun trace: servers={}", servers.join(", ")));
+    stun_trace(
+        &mut trace,
+        format!("stun trace: servers={}", servers.join(", ")),
+    );
 
     let mut seed = txid_seed();
     let mut last_err = None;
@@ -155,13 +156,19 @@ fn detect_public_endpoint_on_socket_inner(
                     family_mismatch_failures += 1;
                 }
                 last_err = Some(format_stun_resolve_error(&server, &err));
-                stun_trace(&mut trace, format!("stun trace: resolve {server} -> ERROR {err}"));
+                stun_trace(
+                    &mut trace,
+                    format!("stun trace: resolve {server} -> ERROR {err}"),
+                );
                 continue;
             }
         };
         stun_trace(
             &mut trace,
-            format!("stun trace: resolve {server} -> {}", fmt_addrs(&server_addrs)),
+            format!(
+                "stun trace: resolve {server} -> {}",
+                fmt_addrs(&server_addrs)
+            ),
         );
 
         let mut sent = false;
@@ -187,7 +194,12 @@ fn detect_public_endpoint_on_socket_inner(
                     break;
                 }
                 Err(err) => {
-                    last_err = Some(format_stun_send_error(&server, server_addr, bind_addr, &err));
+                    last_err = Some(format_stun_send_error(
+                        &server,
+                        server_addr,
+                        bind_addr,
+                        &err,
+                    ));
                     stun_trace(
                         &mut trace,
                         format!(
@@ -208,7 +220,10 @@ fn detect_public_endpoint_on_socket_inner(
             return Err(dns_resolution_hint());
         }
 
-        if resolve_failures == total_servers && family_mismatch_failures == total_servers && total_servers > 0 {
+        if resolve_failures == total_servers
+            && family_mismatch_failures == total_servers
+            && total_servers > 0
+        {
             let want_label = if bind_addr.is_ipv4() { "IPv4" } else { "IPv6" };
             return Err(format!(
                 "nenhum servidor STUN tem endereco {want_label} (todos resolveram apenas a outra familia); tente rebind para a outra familia ou configure `PASTA_P2P_STUN`"
@@ -216,7 +231,9 @@ fn detect_public_endpoint_on_socket_inner(
         }
 
         return Err(match last_err {
-            Some(err) if total_servers > 0 => format!("{err} (servidores testados: {total_servers})"),
+            Some(err) if total_servers > 0 => {
+                format!("{err} (servidores testados: {total_servers})")
+            }
             Some(err) => err,
             None => "STUN sem servidores".to_string(),
         });
@@ -232,7 +249,10 @@ fn detect_public_endpoint_on_socket_inner(
         match socket.recv_from(&mut buf) {
             Ok((size, from)) => {
                 recv_count = recv_count.saturating_add(1);
-                stun_trace(&mut trace, format!("stun trace: recv from={from} bytes={size}"));
+                stun_trace(
+                    &mut trace,
+                    format!("stun trace: recv from={from} bytes={size}"),
+                );
                 if let Some((txid, endpoint)) = parse_stun_response(&buf[..size]) {
                     parsed_count = parsed_count.saturating_add(1);
                     let matching = sent_requests.iter().find(|req| req.txid == txid);
@@ -452,7 +472,10 @@ fn describe_stun_datagram(data: &[u8]) -> String {
     let msg_type = u16::from_be_bytes([data[0], data[1]]);
     let msg_len = u16::from_be_bytes([data[2], data[3]]);
     if data.len() < 8 {
-        return format!("len={} msg_type=0x{msg_type:04x} msg_len={msg_len}", data.len());
+        return format!(
+            "len={} msg_type=0x{msg_type:04x} msg_len={msg_len}",
+            data.len()
+        );
     }
 
     let cookie = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
@@ -472,7 +495,10 @@ fn describe_stun_datagram(data: &[u8]) -> String {
     )
 }
 
-fn select_stun_addrs(addrs: impl IntoIterator<Item = SocketAddr>, want_v4: bool) -> Vec<SocketAddr> {
+fn select_stun_addrs(
+    addrs: impl IntoIterator<Item = SocketAddr>,
+    want_v4: bool,
+) -> Vec<SocketAddr> {
     let mut selected = Vec::new();
     for addr in addrs {
         let candidate = match (want_v4, addr) {
@@ -544,7 +570,12 @@ fn fmt_addrs_compact(addrs: impl IntoIterator<Item = SocketAddr>) -> String {
     out
 }
 
-fn format_stun_send_error(server: &str, server_addr: SocketAddr, bind_addr: SocketAddr, err: &io::Error) -> String {
+fn format_stun_send_error(
+    server: &str,
+    server_addr: SocketAddr,
+    bind_addr: SocketAddr,
+    err: &io::Error,
+) -> String {
     let mut msg = format!("falha STUN {server} ({server_addr}): {err}");
     if err.kind() == io::ErrorKind::AddrNotAvailable {
         let hint = if server_addr.is_ipv6() {
@@ -553,7 +584,9 @@ fn format_stun_send_error(server: &str, server_addr: SocketAddr, bind_addr: Sock
             " (EADDRNOTAVAIL: sem IPv4 valido; verifique interface/rota ou mude pra IPv6)"
         };
         msg.push_str(hint);
-    } else if err.kind() == io::ErrorKind::InvalidInput && (server_addr.is_ipv4() != bind_addr.is_ipv4()) {
+    } else if err.kind() == io::ErrorKind::InvalidInput
+        && (server_addr.is_ipv4() != bind_addr.is_ipv4())
+    {
         msg.push_str(" (familia IP diferente do bind; verifique modo IPv4/IPv6)");
     }
     msg
@@ -727,6 +760,9 @@ mod tests {
         let mapped = Ipv6Addr::from([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 1, 2, 3, 4]);
         let input = vec![SocketAddr::new(IpAddr::V6(mapped), 3478)];
         let v4 = select_stun_addrs(input, true);
-        assert_eq!(v4, vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 3478)]);
+        assert_eq!(
+            v4,
+            vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 3478)]
+        );
     }
 }
