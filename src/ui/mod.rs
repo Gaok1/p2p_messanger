@@ -30,6 +30,9 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::net::{NetCommand, NetEvent};
 
+mod components;
+use components::{Button, ButtonAction, ClickTarget, ReceivedClickAction, ReceivedClickTarget};
+
 const MAX_PEER_INPUT: usize = 120;
 const MAX_LOGS: usize = 200;
 const PROGRESS_BAR_WIDTH: usize = 16;
@@ -156,28 +159,6 @@ impl IncomingStatus {
             IncomingStatus::Canceled => "cancelado",
         }
     }
-}
-
-#[derive(Clone, Copy)]
-enum ButtonAction {
-    ConnectPeer,
-    SelectIpv4,
-    SelectIpv6,
-    ToggleMouseMode,
-    CopyLocalIp,
-    CopyPublicEndpoint,
-    PastePeerIp,
-    AddFiles,
-    SendFiles,
-    CancelTransfers,
-    Quit,
-}
-
-#[derive(Clone)]
-struct Button {
-    label: String,
-    area: Rect,
-    action: ButtonAction,
 }
 
 #[derive(Clone, Copy)]
@@ -432,9 +413,13 @@ pub fn run_app(
             set_mouse_capture(terminal, enabled)?;
             app.mouse_capture_enabled = enabled;
             if enabled {
-                app.push_log("mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)");
+                app.push_log(
+                    "mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)",
+                );
             } else {
-                app.push_log("mouse livre: selecione o texto no terminal (pressione 'm' para voltar)");
+                app.push_log(
+                    "mouse livre: selecione o texto no terminal (pressione 'm' para voltar)",
+                );
             }
         }
 
@@ -474,7 +459,9 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
         NetEvent::Bound(addr) => {
             app.bind_addr = addr;
             app.local_ip = detect_local_ips(addr.ip());
-            app.mode = app.mode.fallback(app.local_ip.has_v4(), app.local_ip.has_v6());
+            app.mode = app
+                .mode
+                .fallback(app.local_ip.has_v4(), app.local_ip.has_v6());
             app.public_endpoint = None;
             app.stun_status = Some("stun...".to_string());
             app.needs_clear = true;
@@ -630,14 +617,20 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
     }
 }
 
-fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
+fn handle_mouse_event(
+    app: &mut AppState,
+    mouse: MouseEvent,
+    net_tx: &tokio_mpsc::UnboundedSender<NetCommand>,
+) {
     if !app.mouse_capture_enabled {
         return;
     }
 
+    let position = (mouse.column, mouse.row);
+
     match mouse.kind {
         MouseEventKind::Moved => {
-            app.last_mouse = Some((mouse.column, mouse.row));
+            app.last_mouse = Some(position);
         }
         MouseEventKind::ScrollUp => {
             if point_in_rect(mouse.column, mouse.row, app.logs_area) {
@@ -650,7 +643,7 @@ fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &tokio_mpsc
             }
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            app.last_mouse = Some((mouse.column, mouse.row));
+            app.last_mouse = Some(position);
             if point_in_rect(mouse.column, mouse.row, app.peer_input_area) {
                 app.peer_focus = true;
                 return;
@@ -664,53 +657,38 @@ fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &tokio_mpsc
                 return;
             }
 
-            if let Some((action, path)) = app
-                .received_click_targets
-                .iter()
-                .find(|target| point_in_rect(mouse.column, mouse.row, target.area))
-                .map(|target| (target.action, target.path.as_path()))
-            {
-                let res = match action {
-                    ReceivedClickAction::Open => open_path_in_default_app(path),
-                    ReceivedClickAction::RevealInFolder => reveal_path_in_file_manager(path),
-                };
-                match res {
-                    Ok(()) => match action {
-                        ReceivedClickAction::Open => {
-                            app.push_log(format!("abrindo {}", path.display()))
-                        }
-                        ReceivedClickAction::RevealInFolder => {
-                            app.push_log(format!("abrindo pasta {}", path.display()))
-                        }
-                    },
-                    Err(err) => match action {
-                        ReceivedClickAction::Open => app.push_log(format!(
-                            "erro ao abrir {}: {err}",
-                            path.display()
-                        )),
-                        ReceivedClickAction::RevealInFolder => app.push_log(format!(
-                            "erro ao abrir pasta {}: {err}",
-                            path.display()
-                        )),
-                    },
-                }
+            let received_targets = app.received_click_targets.clone();
+            if handle_click_targets(&received_targets, position, app, net_tx) {
                 return;
             }
 
-            if let Some(action) = app
-                .buttons
-                .iter()
-                .find(|button| point_in_rect(mouse.column, mouse.row, button.area))
-                .map(|button| button.action)
-            {
-                handle_button_action(app, action, net_tx);
-            }
+            let buttons = app.buttons.clone();
+            handle_click_targets(&buttons, position, app, net_tx);
         }
         _ => {}
     }
 }
 
-fn handle_button_action(app: &mut AppState, action: ButtonAction, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
+fn handle_click_targets<T: ClickTarget>(
+    targets: &[T],
+    position: (u16, u16),
+    app: &mut AppState,
+    net_tx: &tokio_mpsc::UnboundedSender<NetCommand>,
+) -> bool {
+    targets
+        .iter()
+        .find(|target| target.contains(position.0, position.1))
+        .map(|target| {
+            target.on_click(app, net_tx);
+        })
+        .is_some()
+}
+
+fn handle_button_action(
+    app: &mut AppState,
+    action: ButtonAction,
+    net_tx: &tokio_mpsc::UnboundedSender<NetCommand>,
+) {
     match action {
         ButtonAction::ConnectPeer => start_connect(app, net_tx),
         ButtonAction::SelectIpv4 => handle_mode_change(app, IpMode::Ipv4, net_tx),
@@ -763,7 +741,11 @@ fn handle_button_action(app: &mut AppState, action: ButtonAction, net_tx: &tokio
     }
 }
 
-fn handle_mode_change(app: &mut AppState, mode: IpMode, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
+fn handle_mode_change(
+    app: &mut AppState,
+    mode: IpMode,
+    net_tx: &tokio_mpsc::UnboundedSender<NetCommand>,
+) {
     if app.mode == mode {
         return;
     }
@@ -798,7 +780,11 @@ fn bind_for_mode(current: SocketAddr, mode: IpMode) -> SocketAddr {
     }
 }
 
-fn handle_peer_input_key(app: &mut AppState, code: KeyCode, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
+fn handle_peer_input_key(
+    app: &mut AppState,
+    code: KeyCode,
+    net_tx: &tokio_mpsc::UnboundedSender<NetCommand>,
+) {
     match code {
         KeyCode::Esc => app.peer_focus = false,
         KeyCode::Enter => {
@@ -1111,7 +1097,11 @@ fn render_outgoing_item(theme: Theme, entry: &OutgoingEntry) -> ListItem<'static
     }
 }
 
-fn render_incoming_info_line(theme: Theme, entry: &IncomingEntry, list_area: Rect) -> ListItem<'static> {
+fn render_incoming_info_line(
+    theme: Theme,
+    entry: &IncomingEntry,
+    list_area: Rect,
+) -> ListItem<'static> {
     let sc = incoming_status_color(theme, entry.status);
 
     let filename = entry
@@ -1154,7 +1144,7 @@ fn render_incoming_info_line(theme: Theme, entry: &IncomingEntry, list_area: Rec
 
     // Layout:
     // "│ " + icon + " " + status + " " + name + filler + (meta?) + " │"
-    let left_len = 4;  // '│' + ' ' + icon + ' '
+    let left_len = 4; // '│' + ' ' + icon + ' '
     let right_len = 2; // ' ' + '│'
     let between_status_and_name = 1;
 
@@ -1162,7 +1152,11 @@ fn render_incoming_info_line(theme: Theme, entry: &IncomingEntry, list_area: Rec
         + status_len
         + between_status_and_name
         + right_len
-        + if meta_text.is_empty() { 0 } else { 1 + meta_len }; // espaço + meta
+        + if meta_text.is_empty() {
+            0
+        } else {
+            1 + meta_len
+        }; // espaço + meta
 
     let name_area = available.saturating_sub(reserved);
     let name = truncate_keep_end(&filename, name_area);
@@ -1197,7 +1191,9 @@ fn render_incoming_info_line(theme: Theme, entry: &IncomingEntry, list_area: Rec
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
             meta_text,
-            Style::default().fg(theme.muted).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.muted)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 
@@ -1206,7 +1202,6 @@ fn render_incoming_info_line(theme: Theme, entry: &IncomingEntry, list_area: Rec
 
     ListItem::new(Line::from(spans))
 }
-
 
 fn render_incoming_action_line(
     theme: Theme,
@@ -1231,7 +1226,9 @@ fn render_incoming_action_line(
         && hover.is_some_and(|(x, y)| point_in_rect(x, y, folder_rect));
 
     let reserved_actions = if show_actions && open_rect.width > 0 && folder_rect.width > 0 {
-        1 + RECEIVED_OPEN_BUTTON_TEXT.chars().count() + 1 + RECEIVED_FOLDER_BUTTON_TEXT.chars().count()
+        1 + RECEIVED_OPEN_BUTTON_TEXT.chars().count()
+            + 1
+            + RECEIVED_FOLDER_BUTTON_TEXT.chars().count()
     } else {
         0
     };
@@ -1243,7 +1240,12 @@ fn render_incoming_action_line(
     let bar_len = bar.chars().count();
     let bar_span = Span::styled(bar, Style::default().fg(sc));
 
-    let info_text = format!(" {} / {} ({}%)", format_bytes(entry.received_bytes.min(entry.size)), format_bytes(entry.size), percent);
+    let info_text = format!(
+        " {} / {} ({}%)",
+        format_bytes(entry.received_bytes.min(entry.size)),
+        format_bytes(entry.size),
+        percent
+    );
     let info_len = info_text.chars().count();
     let info_span = Span::styled(info_text, Style::default().fg(theme.muted));
 
@@ -1255,7 +1257,11 @@ fn render_incoming_action_line(
     let mut line = vec![prefix, bar_span, info_span, filler];
     if show_actions && open_rect.width > 0 && folder_rect.width > 0 {
         let open_bg = if open_hover { theme.accent } else { theme.ok };
-        let folder_bg = if folder_hover { theme.accent } else { theme.info };
+        let folder_bg = if folder_hover {
+            theme.accent
+        } else {
+            theme.info
+        };
         line.push(Span::raw(" "));
         line.push(Span::styled(
             RECEIVED_OPEN_BUTTON_TEXT,
@@ -1282,11 +1288,12 @@ fn max_received_entries_for_area(list_area: Rect) -> usize {
     (inner.height as usize) / 2
 }
 
-fn build_received_view<'a>(received: &'a [IncomingEntry], max_entries: usize) -> Vec<&'a IncomingEntry> {
+fn build_received_view<'a>(
+    received: &'a [IncomingEntry],
+    max_entries: usize,
+) -> Vec<&'a IncomingEntry> {
     received.iter().rev().take(max_entries).collect()
 }
-
-
 
 fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     let theme = Theme::default_dark();
@@ -1786,19 +1793,6 @@ fn inner_block_area(area: Rect) -> Rect {
     }
 }
 
-#[derive(Clone)]
-struct ReceivedClickTarget {
-    area: Rect,
-    path: PathBuf,
-    action: ReceivedClickAction,
-}
-
-#[derive(Clone, Copy)]
-enum ReceivedClickAction {
-    Open,
-    RevealInFolder,
-}
-
 fn received_open_button_rect(list_area: Rect, idx: usize) -> Rect {
     let inner = inner_block_area(list_area);
     let open_w = RECEIVED_OPEN_BUTTON_TEXT.chars().count() as u16;
@@ -1933,7 +1927,10 @@ fn reveal_path_in_file_manager(path: &std::path::Path) -> io::Result<()> {
 
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open").args(["-R"]).arg(path).spawn()?;
+        std::process::Command::new("open")
+            .args(["-R"])
+            .arg(path)
+            .spawn()?;
         return Ok(());
     }
 
