@@ -108,21 +108,32 @@ pub fn detect_public_endpoint_on_socket(
     let mut last_err = None;
     let mut requests = Vec::new();
     for server in servers {
-        let server_addr = match resolve_stun_server(server.as_str(), bind_addr) {
-            Ok(addr) => addr,
+        let server_addrs = match resolve_stun_server_addrs(server.as_str(), bind_addr) {
+            Ok(addrs) => addrs,
             Err(err) => {
                 last_err = Some(format!("falha ao resolver STUN {server}: {err}"));
                 continue;
             }
         };
 
-        let txid = next_transaction_id(&mut seed);
-        let request = build_stun_request(txid);
-        if let Err(err) = socket.send_to(&request, server_addr) {
-            last_err = Some(format!("falha STUN {server}: {err}"));
+        let mut sent = false;
+        for server_addr in server_addrs {
+            let txid = next_transaction_id(&mut seed);
+            let request = build_stun_request(txid);
+            match socket.send_to(&request, server_addr) {
+                Ok(_) => {
+                    requests.push(txid);
+                    sent = true;
+                    break;
+                }
+                Err(err) => {
+                    last_err = Some(format_stun_send_error(&server, server_addr, bind_addr, err));
+                }
+            }
+        }
+        if !sent {
             continue;
         }
-        requests.push(txid);
     }
 
     if requests.is_empty() {
@@ -187,18 +198,78 @@ pub(crate) fn stun_server_list(bind_addr: SocketAddr) -> Vec<String> {
     }
 }
 
-fn resolve_stun_server(server: &str, bind_addr: SocketAddr) -> io::Result<SocketAddr> {
+fn resolve_stun_server_addrs(server: &str, bind_addr: SocketAddr) -> io::Result<Vec<SocketAddr>> {
     let want_v4 = bind_addr.is_ipv4();
-    let mut first = None;
-    for addr in server.to_socket_addrs()? {
-        if first.is_none() {
-            first = Some(addr);
-        }
-        if want_v4 == addr.is_ipv4() {
-            return Ok(addr);
+    let resolved: Vec<SocketAddr> = server.to_socket_addrs()?.collect();
+    if resolved.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::Other, "STUN sem endereco"));
+    }
+
+    let selected = select_stun_addrs(resolved.iter().copied(), want_v4);
+    if selected.is_empty() {
+        let want_label = if want_v4 { "IPv4" } else { "IPv6" };
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "STUN sem endereco {want_label} (resolvido: {})",
+                fmt_addrs(&resolved)
+            ),
+        ));
+    }
+
+    Ok(selected)
+}
+
+fn select_stun_addrs(addrs: impl IntoIterator<Item = SocketAddr>, want_v4: bool) -> Vec<SocketAddr> {
+    let mut selected = Vec::new();
+    for addr in addrs {
+        let candidate = match (want_v4, addr) {
+            (true, SocketAddr::V4(_)) => Some(addr),
+            (true, SocketAddr::V6(v6)) => v6
+                .ip()
+                .to_ipv4_mapped()
+                .map(|v4| SocketAddr::new(IpAddr::V4(v4), v6.port())),
+            (false, SocketAddr::V6(_)) => Some(addr),
+            (false, SocketAddr::V4(_)) => None,
+        };
+
+        if let Some(candidate) = candidate {
+            if !selected.contains(&candidate) {
+                selected.push(candidate);
+            }
         }
     }
-    first.ok_or_else(|| io::Error::new(io::ErrorKind::Other, "STUN sem endereco"))
+    selected
+}
+
+fn fmt_addrs(addrs: &[SocketAddr]) -> String {
+    const MAX: usize = 6;
+    let mut out = String::new();
+    for (idx, addr) in addrs.iter().take(MAX).enumerate() {
+        if idx > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&addr.to_string());
+    }
+    if addrs.len() > MAX {
+        out.push_str(", ...");
+    }
+    out
+}
+
+fn format_stun_send_error(server: &str, server_addr: SocketAddr, bind_addr: SocketAddr, err: io::Error) -> String {
+    let mut msg = format!("falha STUN {server} ({server_addr}): {err}");
+    if err.kind() == io::ErrorKind::AddrNotAvailable {
+        let hint = if server_addr.is_ipv6() {
+            " (EADDRNOTAVAIL: IPv6 sem rota/endereco; tente modo IPv4)"
+        } else {
+            " (EADDRNOTAVAIL: sem IPv4 valido; verifique interface/rota ou mude pra IPv6)"
+        };
+        msg.push_str(hint);
+    } else if err.kind() == io::ErrorKind::InvalidInput && (server_addr.is_ipv4() != bind_addr.is_ipv4()) {
+        msg.push_str(" (familia IP diferente do bind; verifique modo IPv4/IPv6)");
+    }
+    msg
 }
 
 fn txid_seed() -> u128 {
@@ -340,5 +411,35 @@ fn parse_xor_mapped_address(value: &[u8], txid: &[u8; 12]) -> Option<SocketAddr>
             Some(SocketAddr::new(IpAddr::V6(ip), port))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_stun_addrs;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+    #[test]
+    fn select_stun_addrs_filters_by_family() {
+        let input = vec![
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 3478),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 3478),
+        ];
+
+        let v4 = select_stun_addrs(input.iter().copied(), true);
+        assert_eq!(v4.len(), 1);
+        assert!(v4[0].is_ipv4());
+
+        let v6 = select_stun_addrs(input.iter().copied(), false);
+        assert_eq!(v6.len(), 1);
+        assert!(v6[0].is_ipv6());
+    }
+
+    #[test]
+    fn select_stun_addrs_accepts_ipv4_mapped_ipv6_for_v4() {
+        let mapped = Ipv6Addr::from([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 1, 2, 3, 4]);
+        let input = vec![SocketAddr::new(IpAddr::V6(mapped), 3478)];
+        let v4 = select_stun_addrs(input, true);
+        assert_eq!(v4, vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 3478)]);
     }
 }
