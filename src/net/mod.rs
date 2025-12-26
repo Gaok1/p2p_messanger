@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     io,
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
     thread,
@@ -10,7 +10,7 @@ use std::{
 
 use base64::Engine;
 use bincode::Options;
-use quinn::{Endpoint, ServerConfig};
+use quinn::{Endpoint, EndpointConfig, ServerConfig};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -103,6 +103,7 @@ pub enum NetCommand {
 /// Eventos gerados pela thread de rede para atualizar a UI.
 pub enum NetEvent {
     Log(String),
+    Bound(SocketAddr),
     PublicEndpoint(SocketAddr),
     FileSent {
         file_id: u64,
@@ -151,11 +152,11 @@ pub fn start_network(
     bind_addr: SocketAddr,
     peer_addr: Option<SocketAddr>,
 ) -> (
-    Sender<NetCommand>,
+    tokio_mpsc::UnboundedSender<NetCommand>,
     Receiver<NetEvent>,
     thread::JoinHandle<()>,
 ) {
-    let (cmd_tx, cmd_rx) = mpsc::channel();
+    let (cmd_tx, cmd_rx) = tokio_mpsc::unbounded_channel();
     let (evt_tx, evt_rx) = mpsc::channel();
     let handle = thread::spawn(move || run_network(bind_addr, peer_addr, cmd_rx, evt_tx));
     (cmd_tx, evt_rx, handle)
@@ -164,7 +165,7 @@ pub fn start_network(
 fn run_network(
     bind_addr: SocketAddr,
     initial_peer: Option<SocketAddr>,
-    cmd_rx: Receiver<NetCommand>,
+    cmd_rx: tokio_mpsc::UnboundedReceiver<NetCommand>,
     evt_tx: Sender<NetEvent>,
 ) {
     let runtime = Runtime::new().expect("runtime");
@@ -178,35 +179,38 @@ fn run_network(
 async fn run_network_async(
     mut bind_addr: SocketAddr,
     initial_peer: Option<SocketAddr>,
-    cmd_rx: Receiver<NetCommand>,
+    mut cmd_rx: tokio_mpsc::UnboundedReceiver<NetCommand>,
     evt_tx: Sender<NetEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     log_transport_config(&evt_tx);
 
     let mut pending_cmds: Vec<NetCommand> = Vec::new();
 
-    let (mut endpoint, _cert) = loop {
+    let (mut endpoint, _cert, initial_stun) = loop {
         match make_endpoint(bind_addr) {
             Ok(ctx) => break ctx,
             Err(err) => {
                 let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir endpoint {err}")));
 
-                match cmd_rx.recv() {
-                    Ok(NetCommand::Rebind(new_bind)) => {
+                match cmd_rx.recv().await {
+                    Some(NetCommand::Rebind(new_bind)) => {
                         if new_bind != bind_addr {
                             bind_addr = new_bind;
-                            run_stun_detection(bind_addr, &evt_tx);
+                            let _ = evt_tx.send(NetEvent::Log("stun sera executado ao reabrir endpoint".to_string()));
                         }
                     }
-                    Ok(NetCommand::Shutdown) => return Ok(()),
-                    Ok(other) => pending_cmds.push(other),
-                    Err(_) => return Ok(()),
+                    Some(NetCommand::Shutdown) | None => return Ok(()),
+                    Some(other) => pending_cmds.push(other),
                 }
             }
         }
     };
 
-    run_stun_detection(bind_addr, &evt_tx);
+    if let Ok(local_addr) = endpoint.local_addr() {
+        bind_addr = local_addr;
+        let _ = evt_tx.send(NetEvent::Bound(local_addr));
+    }
+    publish_stun_result(initial_stun, &evt_tx);
 
     let mut connected_peer: Option<SocketAddr> = None;
     let mut session_dir: Option<PathBuf> = None;
@@ -237,11 +241,12 @@ async fn run_network_async(
             for cmd in queued {
                 let exit = handle_command(
                     cmd,
+                    &mut bind_addr,
                     &mut connected_peer,
                     &mut connection,
                     &mut next_file_id,
                     &evt_tx,
-                    &cmd_rx,
+                    &mut cmd_rx,
                     &mut pending_cmds,
                     &mut endpoint,
                     &mut inbound_tx,
@@ -254,47 +259,51 @@ async fn run_network_async(
             }
         }
 
-        while let Ok(cmd) = cmd_rx.try_recv() {
-            match cmd {
-                NetCommand::Rebind(new_bind) => {
-                    if new_bind != bind_addr {
-                        let _ = evt_tx.send(NetEvent::Log(format!("reconfigurando bind para {new_bind}")));
-                        match make_endpoint(new_bind) {
-                            Ok((new_endpoint, _)) => {
-                                endpoint = new_endpoint;
-                                bind_addr = new_bind;
-                                connection = None;
-                                connected_peer = None;
-                                session_dir = None;
-                                incoming.clear();
-                                next_file_id = 1;
-                                run_stun_detection(bind_addr, &evt_tx);
-                            }
-                            Err(err) => {
-                                let _ = evt_tx.send(NetEvent::Log(format!("erro ao reconfigurar {err}")));
+        tokio::select! {
+            cmd = cmd_rx.recv() => {
+                match cmd {
+                    Some(NetCommand::Rebind(new_bind)) => {
+                        if new_bind != bind_addr {
+                            let _ = evt_tx.send(NetEvent::Log(format!("reconfigurando bind para {new_bind}")));
+                            match make_endpoint(new_bind) {
+                                Ok((new_endpoint, _, stun_res)) => {
+                                    endpoint = new_endpoint;
+                                    bind_addr = endpoint.local_addr().unwrap_or(new_bind);
+                                    let _ = evt_tx.send(NetEvent::Bound(bind_addr));
+                                    connection = None;
+                                    connected_peer = None;
+                                    session_dir = None;
+                                    incoming.clear();
+                                    next_file_id = 1;
+                                    publish_stun_result(stun_res, &evt_tx);
+                                }
+                                Err(err) => {
+                                    let _ = evt_tx.send(NetEvent::Log(format!("erro ao reconfigurar {err}")));
+                                }
                             }
                         }
                     }
-                }
-                other => {
-                    let exit = handle_command(
-                        other,
-                        &mut connected_peer,
-                        &mut connection,
-                        &mut next_file_id,
-                        &evt_tx,
-                        &cmd_rx,
-                        &mut pending_cmds,
-                        &mut endpoint,
-                        &mut inbound_tx,
-                        &mut reader_task,
-                    ).await?;
-                    if exit { return Ok(()); }
+                    Some(other) => {
+                        let exit = handle_command(
+                            other,
+                            &mut bind_addr,
+                            &mut connected_peer,
+                            &mut connection,
+                            &mut next_file_id,
+                            &evt_tx,
+                            &mut cmd_rx,
+                            &mut pending_cmds,
+                            &mut endpoint,
+                            &mut inbound_tx,
+                            &mut reader_task,
+                        ).await?;
+                        if exit {
+                            return Ok(());
+                        }
+                    }
+                    None => return Ok(()),
                 }
             }
-        }
-
-        tokio::select! {
             incoming = endpoint.accept() => {
                 if let Some(connecting) = incoming {
                     match connecting.await {
@@ -350,11 +359,12 @@ async fn run_network_async(
 
 async fn handle_command(
     cmd: NetCommand,
+    bind_addr: &mut SocketAddr,
     connected_peer: &mut Option<SocketAddr>,
     connection: &mut Option<quinn::Connection>,
     next_file_id: &mut u64,
     evt_tx: &Sender<NetEvent>,
-    cmd_rx: &Receiver<NetCommand>,
+    cmd_rx: &mut tokio_mpsc::UnboundedReceiver<NetCommand>,
     pending_cmds: &mut Vec<NetCommand>,
     endpoint: &mut Endpoint,
     inbound_tx: &mut tokio_mpsc::UnboundedSender<(WireMessage, SocketAddr)>,
@@ -362,6 +372,31 @@ async fn handle_command(
 ) -> io::Result<bool> {
     match cmd {
         NetCommand::ConnectPeer(addr) => {
+            let family_mismatch = endpoint
+                .local_addr()
+                .ok()
+                .is_some_and(|local| local.is_ipv4() != addr.is_ipv4());
+            if family_mismatch {
+                let new_bind = if addr.is_ipv4() {
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
+                } else {
+                    SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
+                };
+                match make_endpoint(new_bind) {
+                    Ok((new_endpoint, _, stun_res)) => {
+                        *endpoint = new_endpoint;
+                        *bind_addr = endpoint.local_addr().unwrap_or(new_bind);
+                        let _ = evt_tx.send(NetEvent::Bound(*bind_addr));
+                        *connection = None;
+                        *connected_peer = None;
+                        let _ = reader_task.take().map(|t| t.abort());
+                        publish_stun_result(stun_res, evt_tx);
+                    }
+                    Err(err) => {
+                        let _ = evt_tx.send(NetEvent::Log(format!("erro ao reconfigurar {err}")));
+                    }
+                }
+            }
             *connected_peer = Some(addr);
             let _ = evt_tx.send(NetEvent::PeerConnecting(addr));
             if let Some(conn) = connect_peer(endpoint, addr, evt_tx).await {
@@ -404,11 +439,10 @@ async fn handle_command(
     Ok(false)
 }
 
-fn run_stun_detection(bind_addr: SocketAddr, evt_tx: &Sender<NetEvent>) {
-    match stun::detect_public_endpoint(bind_addr) {
+fn publish_stun_result(result: Result<Option<SocketAddr>, String>, evt_tx: &Sender<NetEvent>) {
+    match result {
         Ok(Some(endpoint)) => {
             let _ = evt_tx.send(NetEvent::PublicEndpoint(endpoint));
-            let _ = evt_tx.send(NetEvent::Log(format!("endpoint publico {endpoint}")));
         }
         Ok(None) => {
             let _ = evt_tx.send(NetEvent::Log("stun indisponivel".to_string()));
@@ -426,22 +460,48 @@ fn log_transport_config(evt_tx: &Sender<NetEvent>) {
     )));
 }
 
-fn make_endpoint(bind_addr: SocketAddr) -> Result<(Endpoint, Vec<u8>), Box<dyn std::error::Error>> {
+fn make_endpoint(
+    bind_addr: SocketAddr,
+) -> Result<(Endpoint, Vec<u8>, Result<Option<SocketAddr>, String>), Box<dyn std::error::Error>> {
     let cert = rcgen::generate_simple_self_signed(["pasta-p2p.local".into()])?;
     let cert_der = cert.serialize_der()?;
     let priv_key = cert.serialize_private_key_der();
 
     let server_config = make_server_config(cert_der.clone(), priv_key.clone())?;
     let client_config = make_client_config();
-    let mut endpoint = Endpoint::server(server_config, bind_addr)?;
+
+    let socket = std::net::UdpSocket::bind(bind_addr)?;
+    let local_addr = socket.local_addr()?;
+    let stun_result = stun::detect_public_endpoint_on_socket(&socket, local_addr);
+    let _ = socket.set_read_timeout(None);
+
+    let mut endpoint = Endpoint::new(
+        EndpointConfig::default(),
+        Some(server_config),
+        socket,
+        std::sync::Arc::new(quinn::TokioRuntime),
+    )?;
     endpoint.set_default_client_config(client_config);
-    Ok((endpoint, cert_der))
+    Ok((endpoint, cert_der, stun_result))
 }
 
 fn make_server_config(cert_der: Vec<u8>, key_der: Vec<u8>) -> Result<ServerConfig, Box<dyn std::error::Error>> {
-    let cert_chain = vec![quinn::rustls::pki_types::CertificateDer::from(cert_der)];
-    let key = quinn::rustls::pki_types::PrivateKeyDer::Pkcs8(key_der.into());
-    let mut server_config = ServerConfig::with_single_cert(cert_chain, key)?;
+    use quinn::rustls;
+    use std::sync::Arc;
+
+    let cert_chain = vec![rustls::pki_types::CertificateDer::from(cert_der)];
+    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(key_der.into());
+
+    let mut crypto = rustls::ServerConfig::builder_with_provider(
+        rustls::crypto::ring::default_provider().into(),
+    )
+    .with_protocol_versions(&[&rustls::version::TLS13])?
+    .with_no_client_auth()
+    .with_single_cert(cert_chain, key)?;
+    crypto.alpn_protocols = vec![b"hq-29".to_vec()];
+
+    let crypto = quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?;
+    let mut server_config = ServerConfig::with_crypto(Arc::new(crypto));
     let mut transport = quinn::TransportConfig::default();
     transport.keep_alive_interval(Some(Duration::from_secs(5)));
     if let Ok(timeout) = quinn::IdleTimeout::try_from(Duration::from_secs(60)) {
@@ -508,6 +568,56 @@ fn make_client_config() -> quinn::ClientConfig {
         .expect("quic client config");
 
     quinn::ClientConfig::new(std::sync::Arc::new(crypto))
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::*;
+
+    #[test]
+    fn creates_endpoint_inside_tokio_runtime() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        runtime.block_on(async {
+            let bind_addr: SocketAddr = "127.0.0.1:0".parse().expect("addr");
+            let result = make_endpoint(bind_addr);
+            assert!(
+                result.is_ok(),
+                "expected endpoint creation to succeed, got {result:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn can_connect_over_loopback() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        runtime.block_on(async {
+            let (evt_tx, _evt_rx) = std::sync::mpsc::channel::<NetEvent>();
+
+            let (server, _, _) = make_endpoint("127.0.0.1:0".parse().expect("server bind"))
+                .expect("server endpoint");
+            let server_addr = server.local_addr().expect("server addr");
+
+            let (mut client, _, _) = make_endpoint("127.0.0.1:0".parse().expect("client bind"))
+                .expect("client endpoint");
+
+            let accept_fut = async {
+                let incoming = server.accept().await.expect("incoming");
+                incoming.await.expect("server connection")
+            };
+
+            let connect_fut = async {
+                connect_peer(&mut client, server_addr, &evt_tx)
+                    .await
+                    .expect("client connection")
+            };
+
+            let _ = tokio::time::timeout(Duration::from_secs(3), async {
+                let (_server_conn, _client_conn) = tokio::join!(accept_fut, connect_fut);
+            })
+            .await
+            .expect("connect timeout");
+        });
+    }
 }
 
 async fn connect_peer(endpoint: &mut Endpoint, peer: SocketAddr, evt_tx: &Sender<NetEvent>) -> Option<quinn::Connection> {

@@ -3,13 +3,14 @@ use std::{
     io,
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::Sender,
 };
 
 use chrono::Local;
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
+    sync::mpsc as tokio_mpsc,
 };
 
 use super::{
@@ -204,7 +205,7 @@ async fn write_framed(stream: &mut quinn::SendStream, payload: &[u8]) -> io::Res
 
 /// Processa a fila de comandos durante um envio para detectar cancelamentos ou encerramentos.
 pub(crate) fn handle_send_control(
-    cmd_rx: &Receiver<NetCommand>,
+    cmd_rx: &mut tokio_mpsc::UnboundedReceiver<NetCommand>,
     pending_cmds: &mut Vec<NetCommand>,
 ) -> SendOutcome {
     while let Ok(cmd) = cmd_rx.try_recv() {
@@ -228,7 +229,7 @@ pub(crate) async fn send_files(
     files: &[PathBuf],
     next_file_id: &mut u64,
     evt_tx: &Sender<NetEvent>,
-    cmd_rx: &Receiver<NetCommand>,
+    cmd_rx: &mut tokio_mpsc::UnboundedReceiver<NetCommand>,
     pending_cmds: &mut Vec<NetCommand>,
     chunk_size: usize,
 ) -> io::Result<SendOutcome> {

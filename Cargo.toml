@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-quinn = { version = "0.11", default-features = false, features = ["rustls"] }
+quinn = { version = "0.11", default-features = false, features = ["rustls", "runtime-tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs", "io-util", "sync"] }
 futures-util = "0.3"
 ratatui = "0.26"

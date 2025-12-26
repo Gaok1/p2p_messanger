@@ -3,8 +3,8 @@ mod ui;
 
 use std::net::SocketAddr;
 
-const DEFAULT_BIND_IPV6: &str = "[::]:5000";
-const DEFAULT_BIND_IPV4: &str = "0.0.0.0:5000";
+const DEFAULT_BIND_IPV6: &str = "[::]:0";
+const DEFAULT_BIND_IPV4: &str = "0.0.0.0:0";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (bind_addr, peer_addr) = parse_args();
@@ -57,5 +57,5 @@ fn default_bind_addr() -> SocketAddr {
         .and_then(|addr| addr.parse().ok())
         .or_else(|| DEFAULT_BIND_IPV6.parse().ok())
         .or_else(|| DEFAULT_BIND_IPV4.parse().ok())
-        .unwrap_or_else(|| "0.0.0.0:5000".parse().expect("fallback de bind valido"))
+        .unwrap_or_else(|| "0.0.0.0:0".parse().expect("fallback de bind valido"))
 }

@@ -6,26 +6,61 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-/// STUN servers dedicados para IPv4.
-const STUN_SERVERS_V4: [&str; 5] = [
+/// Lista de servidores STUN para IPv4.
+///
+/// Importante: hostnames não são “dedicados” a uma família; muitos resolvem A e AAAA.
+/// A seleção real por família acontece em `resolve_stun_server` (filtra por A vs AAAA).
+const STUN_SERVERS_V4: [&str; 12] = [
+    // Cloudflare
     "stun.cloudflare.com:3478",
+
+    // Twilio (STUN global)
+    "global.stun.twilio.com:3478",
+
+    // Google (WebRTC)
     "stun.l.google.com:19302",
     "stun1.l.google.com:19302",
+    "stun2.l.google.com:19302",
+    "stun3.l.google.com:19302",
+    "stun4.l.google.com:19302",
+
+    // Outros
     "stun.sipgate.net:3478",
-    "stun.stunprotocol.net:3478",
+    "stun.nextcloud.com:443",
+    "stun.zoiper.com:3478",
+    "stun.ekiga.net:3478",
+    "stun.voxgratia.org:3478",
 ];
 
-/// STUN servers dedicados para IPv6.
-const STUN_SERVERS_V6: [&str; 5] = [
+/// Lista de servidores STUN para IPv6.
+///
+/// Importante: hostnames não são “dedicados” a uma família; muitos resolvem A e AAAA.
+/// A seleção real por família acontece em `resolve_stun_server` (filtra por A vs AAAA).
+const STUN_SERVERS_V6: [&str; 13] = [
+    // Cloudflare
+    "stun.cloudflare.com:3478",
+
+    // Twilio (STUN global)
+    "global.stun.twilio.com:3478",
+
+    // Google (WebRTC)
     "stun.l.google.com:19302",
     "stun1.l.google.com:19302",
+    "stun2.l.google.com:19302",
+    "stun3.l.google.com:19302",
+    "stun4.l.google.com:19302",
+
+    // Outros
     "stun.sipgate.net:3478",
-    "stun.antisip.com:3478",
-    "stun.callwithus.com:3478",
+    "stun.nextcloud.com:443",
+    "stun.zoiper.com:3478",
+    "stun.ekiga.net:3478",
+    "stunserver.org:3478",
+    "stun.voxgratia.org:3478",
 ];
 
 const STUN_TIMEOUT: Duration = Duration::from_secs(1);
-const STUN_READ_TIMEOUT: Duration = Duration::from_millis(200);
+pub const STUN_READ_TIMEOUT: Duration = Duration::from_millis(200);
 const STUN_MAGIC_COOKIE: u32 = 0x2112A442;
 const STUN_BINDING_REQUEST: u16 = 0x0001;
 const STUN_BINDING_SUCCESS: u16 = 0x0101;
@@ -52,7 +87,18 @@ fn detect_public_endpoint_inner(bind_addr: SocketAddr) -> Result<Option<SocketAd
     let socket =
         UdpSocket::bind(bind_addr).map_err(|err| format!("falha ao abrir UDP para STUN: {err}"))?;
     let _ = socket.set_read_timeout(Some(STUN_READ_TIMEOUT));
+    detect_public_endpoint_on_socket(&socket, bind_addr)
+}
 
+/// Executa a detecção do endpoint público usando um socket já aberto/bindado.
+///
+/// Útil quando a porta do QUIC já está ocupada (Windows), mas precisamos usar a mesma porta
+/// para que o endpoint público seja válido.
+pub fn detect_public_endpoint_on_socket(
+    socket: &UdpSocket,
+    bind_addr: SocketAddr,
+) -> Result<Option<SocketAddr>, String> {
+    let _ = socket.set_read_timeout(Some(STUN_READ_TIMEOUT));
     let servers = stun_server_list(bind_addr);
     if servers.is_empty() {
         return Err("STUN sem servidores".to_string());

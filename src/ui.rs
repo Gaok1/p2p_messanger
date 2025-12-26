@@ -3,7 +3,7 @@ use std::{
     io::{self, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::Receiver,
     time::Duration,
 };
 
@@ -25,6 +25,8 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, Paragraph},
 };
+
+use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::net::{NetCommand, NetEvent};
 
@@ -217,6 +219,9 @@ pub struct AppState {
     selected: Vec<OutgoingEntry>,
     received: Vec<IncomingEntry>,
     logs: Vec<String>,
+    logs_scroll: usize,
+    logs_view_height: usize,
+    logs_area: Rect,
     buttons: Vec<Button>,
     peer_input_area: Rect,
     last_mouse: Option<(u16, u16)>,
@@ -250,6 +255,9 @@ impl AppState {
             selected: Vec::new(),
             received: Vec::new(),
             logs: Vec::new(),
+            logs_scroll: 0,
+            logs_view_height: 0,
+            logs_area: Rect::default(),
             buttons: Vec::new(),
             peer_input_area: Rect::default(),
             last_mouse: None,
@@ -260,15 +268,48 @@ impl AppState {
 
     fn push_log(&mut self, message: impl Into<String>) {
         let message = message.into();
+        let was_at_bottom = self.logs_scroll == self.max_logs_scroll();
         self.logs.push(message.clone());
         if self.logs.len() > MAX_LOGS {
             let excess = self.logs.len() - MAX_LOGS;
             self.logs.drain(0..excess);
+            self.logs_scroll = self.logs_scroll.saturating_sub(excess);
+        }
+
+        if was_at_bottom {
+            self.logs_scroll = self.max_logs_scroll();
+        } else {
+            self.logs_scroll = self.logs_scroll.min(self.max_logs_scroll());
         }
 
         if let Err(err) = append_log_to_file(&message) {
             eprintln!("failed to write log file: {err}");
         }
+    }
+
+    fn max_logs_scroll(&self) -> usize {
+        self.logs.len().saturating_sub(self.logs_view_height)
+    }
+
+    fn set_logs_view_height(&mut self, height: usize) {
+        self.logs_view_height = height;
+        self.logs_scroll = self.logs_scroll.min(self.max_logs_scroll());
+    }
+
+    fn scroll_logs_up(&mut self, lines: usize) {
+        self.logs_scroll = self.logs_scroll.saturating_sub(lines);
+    }
+
+    fn scroll_logs_down(&mut self, lines: usize) {
+        self.logs_scroll = (self.logs_scroll + lines).min(self.max_logs_scroll());
+    }
+
+    fn scroll_logs_top(&mut self) {
+        self.logs_scroll = 0;
+    }
+
+    fn scroll_logs_bottom(&mut self) {
+        self.logs_scroll = self.max_logs_scroll();
     }
 
     fn mode_supported(&self, mode: IpMode) -> bool {
@@ -328,7 +369,7 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -
 pub fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut AppState,
-    net_tx: Sender<NetCommand>,
+    net_tx: tokio_mpsc::UnboundedSender<NetCommand>,
     net_rx: Receiver<NetEvent>,
 ) -> io::Result<()> {
     let tick_rate = Duration::from_millis(100);
@@ -352,6 +393,12 @@ pub fn run_app(
                         handle_peer_input_key(app, key.code, &net_tx);
                     } else {
                         match key.code {
+                            KeyCode::Up => app.scroll_logs_up(1),
+                            KeyCode::Down => app.scroll_logs_down(1),
+                            KeyCode::PageUp => app.scroll_logs_up(app.logs_view_height.max(1)),
+                            KeyCode::PageDown => app.scroll_logs_down(app.logs_view_height.max(1)),
+                            KeyCode::Home => app.scroll_logs_top(),
+                            KeyCode::End => app.scroll_logs_bottom(),
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             _ => {}
                         }
@@ -382,6 +429,14 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 app.stun_status = None;
             }
             app.push_log(message);
+        }
+        NetEvent::Bound(addr) => {
+            app.bind_addr = addr;
+            app.local_ip = detect_local_ips(addr.ip());
+            app.mode = app.mode.fallback(app.local_ip.has_v4(), app.local_ip.has_v6());
+            app.public_endpoint = None;
+            app.stun_status = Some("stun...".to_string());
+            app.needs_clear = true;
         }
         NetEvent::PublicEndpoint(endpoint) => {
             app.public_endpoint = Some(endpoint);
@@ -514,10 +569,20 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
     }
 }
 
-fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &Sender<NetCommand>) {
+fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
     match mouse.kind {
         MouseEventKind::Moved => {
             app.last_mouse = Some((mouse.column, mouse.row));
+        }
+        MouseEventKind::ScrollUp => {
+            if point_in_rect(mouse.column, mouse.row, app.logs_area) {
+                app.scroll_logs_up(3);
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if point_in_rect(mouse.column, mouse.row, app.logs_area) {
+                app.scroll_logs_down(3);
+            }
         }
         MouseEventKind::Down(MouseButton::Left) => {
             app.last_mouse = Some((mouse.column, mouse.row));
@@ -540,7 +605,7 @@ fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &Sender<Net
     }
 }
 
-fn handle_button_action(app: &mut AppState, action: ButtonAction, net_tx: &Sender<NetCommand>) {
+fn handle_button_action(app: &mut AppState, action: ButtonAction, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
     match action {
         ButtonAction::ConnectPeer => start_connect(app, net_tx),
         ButtonAction::SelectIpv4 => handle_mode_change(app, IpMode::Ipv4, net_tx),
@@ -590,7 +655,7 @@ fn handle_button_action(app: &mut AppState, action: ButtonAction, net_tx: &Sende
     }
 }
 
-fn handle_mode_change(app: &mut AppState, mode: IpMode, net_tx: &Sender<NetCommand>) {
+fn handle_mode_change(app: &mut AppState, mode: IpMode, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
     if app.mode == mode {
         return;
     }
@@ -625,7 +690,7 @@ fn bind_for_mode(current: SocketAddr, mode: IpMode) -> SocketAddr {
     }
 }
 
-fn handle_peer_input_key(app: &mut AppState, code: KeyCode, net_tx: &Sender<NetCommand>) {
+fn handle_peer_input_key(app: &mut AppState, code: KeyCode, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
     match code {
         KeyCode::Esc => app.peer_focus = false,
         KeyCode::Enter => {
@@ -711,7 +776,7 @@ fn paste_peer_ip(app: &mut AppState) {
     }
 }
 
-fn start_connect(app: &mut AppState, net_tx: &Sender<NetCommand>) {
+fn start_connect(app: &mut AppState, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
     match parse_peer_addr(&app.peer_input) {
         Some(addr) => {
             if let Err(err) = net_tx.send(NetCommand::ConnectPeer(addr)) {
@@ -735,15 +800,7 @@ fn parse_peer_addr(input: &str) -> Option<SocketAddr> {
         return Some(addr);
     }
 
-    if !trimmed.contains(']') && trimmed.contains(':') {
-        let with_port = format!("[{trimmed}]:5000");
-        if let Ok(addr) = with_port.parse() {
-            return Some(addr);
-        }
-    }
-
-    let with_port = format!("{trimmed}:5000");
-    with_port.parse().ok()
+    None
 }
 
 fn status_color(theme: Theme, status: &ConnectStatus) -> Color {
@@ -1026,11 +1083,13 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
 
     frame.render_widget(received, right[0]);
 
-    let log_items = app
-        .logs
+    app.logs_area = right[1];
+    app.set_logs_view_height(right[1].height.saturating_sub(2) as usize);
+
+    let start = app.logs_scroll.min(app.max_logs_scroll());
+    let end = (start + app.logs_view_height).min(app.logs.len());
+    let log_items = app.logs[start..end]
         .iter()
-        .rev()
-        .take(20)
         .map(|line| ListItem::new(Span::styled(line.clone(), log_style(theme, line))))
         .collect::<Vec<_>>();
 
@@ -1141,9 +1200,9 @@ fn render_connection_panel(
     let input_title = "ip do parceiro";
 
     let placeholder = if matches!(app.mode, IpMode::Ipv4) {
-        "ex: 192.0.2.10:5000"
+        "ex: 192.0.2.10:12345"
     } else {
-        "ex: [2001:db8::1]:5000"
+        "ex: [2001:db8::1]:12345"
     };
     let input_text = if app.peer_input.is_empty() {
         placeholder.to_string()
