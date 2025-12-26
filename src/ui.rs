@@ -4,7 +4,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     sync::mpsc::Receiver,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use arboard::Clipboard;
@@ -33,6 +33,8 @@ use crate::net::{NetCommand, NetEvent};
 const MAX_PEER_INPUT: usize = 120;
 const MAX_LOGS: usize = 200;
 const PROGRESS_BAR_WIDTH: usize = 16;
+const RECEIVED_OPEN_BUTTON_TEXT: &str = " Abrir ";
+const RECEIVED_FOLDER_BUTTON_TEXT: &str = " Pasta ";
 const LOG_FILE_PATH: &str = "p2p_logs.txt";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +136,9 @@ struct IncomingEntry {
     size: u64,
     received_bytes: u64,
     status: IncomingStatus,
+    rate_mbps: f64,
+    rate_last_at: Option<Instant>,
+    rate_last_bytes: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -221,7 +226,7 @@ pub struct AppState {
     mouse_capture_request: Option<bool>,
     local_panel_area: Rect,
     public_panel_area: Rect,
-    received_click_targets: Vec<(Rect, PathBuf)>,
+    received_click_targets: Vec<ReceivedClickTarget>,
     selected: Vec<OutgoingEntry>,
     received: Vec<IncomingEntry>,
     logs: Vec<String>,
@@ -500,6 +505,8 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
             {
                 entry.status = IncomingStatus::Done;
                 entry.received_bytes = entry.size;
+                entry.rate_mbps = 0.0;
+                entry.rate_last_at = None;
             }
             app.push_log(format!("recebido {}", path.display()));
         }
@@ -556,6 +563,9 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 size,
                 received_bytes: 0,
                 status: IncomingStatus::Receiving,
+                rate_mbps: 0.0,
+                rate_last_at: Some(Instant::now()),
+                rate_last_bytes: 0,
             });
         }
         NetEvent::ReceiveProgress {
@@ -568,6 +578,21 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 .iter_mut()
                 .find(|entry| entry.file_id == file_id)
             {
+                let now = Instant::now();
+                if let Some(last_at) = entry.rate_last_at {
+                    let dt = now.duration_since(last_at);
+                    if dt >= Duration::from_millis(250) {
+                        let new_bytes = bytes_received.min(size);
+                        let delta = new_bytes.saturating_sub(entry.rate_last_bytes);
+                        let dt_s = dt.as_secs_f64().max(0.001);
+                        entry.rate_mbps = (delta as f64 * 8.0) / dt_s / 1_000_000.0;
+                        entry.rate_last_at = Some(now);
+                        entry.rate_last_bytes = new_bytes;
+                    }
+                } else {
+                    entry.rate_last_at = Some(now);
+                    entry.rate_last_bytes = bytes_received.min(size);
+                }
                 entry.size = size;
                 entry.received_bytes = bytes_received.min(size);
                 if matches!(entry.status, IncomingStatus::Done) {
@@ -639,14 +664,35 @@ fn handle_mouse_event(app: &mut AppState, mouse: MouseEvent, net_tx: &tokio_mpsc
                 return;
             }
 
-            if let Some((_, path)) = app
+            if let Some((action, path)) = app
                 .received_click_targets
                 .iter()
-                .find(|(area, _)| point_in_rect(mouse.column, mouse.row, *area))
+                .find(|target| point_in_rect(mouse.column, mouse.row, target.area))
+                .map(|target| (target.action, target.path.as_path()))
             {
-                match open_path_in_default_app(path.as_path()) {
-                    Ok(()) => app.push_log(format!("abrindo {}", path.display())),
-                    Err(err) => app.push_log(format!("erro ao abrir {}: {err}", path.display())),
+                let res = match action {
+                    ReceivedClickAction::Open => open_path_in_default_app(path),
+                    ReceivedClickAction::RevealInFolder => reveal_path_in_file_manager(path),
+                };
+                match res {
+                    Ok(()) => match action {
+                        ReceivedClickAction::Open => {
+                            app.push_log(format!("abrindo {}", path.display()))
+                        }
+                        ReceivedClickAction::RevealInFolder => {
+                            app.push_log(format!("abrindo pasta {}", path.display()))
+                        }
+                    },
+                    Err(err) => match action {
+                        ReceivedClickAction::Open => app.push_log(format!(
+                            "erro ao abrir {}: {err}",
+                            path.display()
+                        )),
+                        ReceivedClickAction::RevealInFolder => app.push_log(format!(
+                            "erro ao abrir pasta {}: {err}",
+                            path.display()
+                        )),
+                    },
                 }
                 return;
             }
@@ -1065,34 +1111,182 @@ fn render_outgoing_item(theme: Theme, entry: &OutgoingEntry) -> ListItem<'static
     }
 }
 
-fn render_incoming_item(theme: Theme, entry: &IncomingEntry) -> ListItem<'static> {
+fn render_incoming_info_line(theme: Theme, entry: &IncomingEntry, list_area: Rect) -> ListItem<'static> {
     let sc = incoming_status_color(theme, entry.status);
 
-    let status = Span::styled(
-        format!("{} ", entry.status.label()),
+    let filename = entry
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| entry.path.display().to_string());
+
+    // --- status agora é “texto em destaque” (sem fundo) ---
+    let status_label = entry.status.label();
+    let status_text = Span::styled(
+        status_label,
         Style::default().fg(sc).add_modifier(Modifier::BOLD),
     );
+    let status_len = status_label.chars().count();
+
+    // Ícone compacto (sem emoji) pra leitura rápida
+    let icon = match entry.status {
+        IncomingStatus::Receiving => "↓",
+        IncomingStatus::Done => "✓",
+        IncomingStatus::Canceled => "×",
+    };
+
+    // Meta do lado direito: tamanho + taxa (se recebendo)
+    let mut meta_parts: Vec<String> = Vec::new();
+    if entry.size > 0 {
+        meta_parts.push(format_bytes(entry.size));
+    }
+    if matches!(entry.status, IncomingStatus::Receiving) && entry.rate_mbps > 0.0 {
+        meta_parts.push(format!("{:.1} Mbps", entry.rate_mbps));
+    }
+    let meta_text = meta_parts.join(" · ");
+    let meta_len = meta_text.chars().count();
+
+    let list_inner = inner_block_area(list_area);
+    let available = list_inner.width as usize;
+    if available == 0 {
+        return ListItem::new(Line::from(Vec::<Span>::new()));
+    }
+
+    // Layout:
+    // "│ " + icon + " " + status + " " + name + filler + (meta?) + " │"
+    let left_len = 4;  // '│' + ' ' + icon + ' '
+    let right_len = 2; // ' ' + '│'
+    let between_status_and_name = 1;
+
+    let reserved = left_len
+        + status_len
+        + between_status_and_name
+        + right_len
+        + if meta_text.is_empty() { 0 } else { 1 + meta_len }; // espaço + meta
+
+    let name_area = available.saturating_sub(reserved);
+    let name = truncate_keep_end(&filename, name_area);
+    let name_len = name.chars().count();
+    let filler_len = name_area.saturating_sub(name_len);
+
+    let bar_style = Style::default().fg(sc).add_modifier(Modifier::BOLD);
+    let right_bar_style = Style::default().fg(theme.border);
+
+    let left_bar = Span::styled("│", bar_style);
+    let icon_span = Span::styled(icon, bar_style);
+
+    let name_span = Span::styled(
+        name,
+        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+    );
+
+    let filler = Span::raw(" ".repeat(filler_len));
+
+    let mut spans = vec![
+        left_bar,
+        Span::raw(" "),
+        icon_span,
+        Span::raw(" "),
+        status_text,
+        Span::raw(" "),
+        name_span,
+        filler,
+    ];
+
+    if !meta_text.is_empty() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            meta_text,
+            Style::default().fg(theme.muted).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled("│", right_bar_style));
+
+    ListItem::new(Line::from(spans))
+}
+
+
+fn render_incoming_action_line(
+    theme: Theme,
+    entry: &IncomingEntry,
+    list_area: Rect,
+    row_idx: usize,
+    hover: Option<(u16, u16)>,
+) -> ListItem<'static> {
+    let sc = incoming_status_color(theme, entry.status);
+
+    let show_actions = matches!(entry.status, IncomingStatus::Done) && entry.path.exists();
+    let list_inner = inner_block_area(list_area);
+    let available = list_inner.width as usize;
+
+    let open_rect = received_open_button_rect(list_area, row_idx);
+    let folder_rect = received_folder_button_rect(list_area, row_idx);
+    let open_hover = show_actions
+        && open_rect.width > 0
+        && hover.is_some_and(|(x, y)| point_in_rect(x, y, open_rect));
+    let folder_hover = show_actions
+        && folder_rect.width > 0
+        && hover.is_some_and(|(x, y)| point_in_rect(x, y, folder_rect));
+
+    let reserved_actions = if show_actions && open_rect.width > 0 && folder_rect.width > 0 {
+        1 + RECEIVED_OPEN_BUTTON_TEXT.chars().count() + 1 + RECEIVED_FOLDER_BUTTON_TEXT.chars().count()
+    } else {
+        0
+    };
+
+    let prefix_text = "  ";
+    let prefix_len = prefix_text.chars().count();
 
     let (bar, percent) = progress_bar(entry.received_bytes, entry.size, PROGRESS_BAR_WIDTH);
+    let bar_len = bar.chars().count();
     let bar_span = Span::styled(bar, Style::default().fg(sc));
-    let info = format!(
-        " {} / {} ({}%) ",
-        format_bytes(entry.received_bytes.min(entry.size)),
-        format_bytes(entry.size),
-        percent
-    );
-    let info_span = Span::styled(info, Style::default().fg(theme.muted));
-    let path_style = if matches!(entry.status, IncomingStatus::Done) {
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-    } else {
-        Style::default().fg(theme.text)
-    };
-    let path = Span::styled(entry.path.display().to_string(), path_style);
 
-    ListItem::new(Line::from(vec![status, bar_span, info_span, path]))
+    let info_text = format!(" {} / {} ({}%)", format_bytes(entry.received_bytes.min(entry.size)), format_bytes(entry.size), percent);
+    let info_len = info_text.chars().count();
+    let info_span = Span::styled(info_text, Style::default().fg(theme.muted));
+
+    let filler_len = available.saturating_sub(prefix_len + bar_len + info_len + reserved_actions);
+    let filler = Span::raw(" ".repeat(filler_len));
+
+    let prefix = Span::styled(prefix_text, Style::default().fg(theme.muted));
+
+    let mut line = vec![prefix, bar_span, info_span, filler];
+    if show_actions && open_rect.width > 0 && folder_rect.width > 0 {
+        let open_bg = if open_hover { theme.accent } else { theme.ok };
+        let folder_bg = if folder_hover { theme.accent } else { theme.info };
+        line.push(Span::raw(" "));
+        line.push(Span::styled(
+            RECEIVED_OPEN_BUTTON_TEXT,
+            Style::default()
+                .fg(theme.bg)
+                .bg(open_bg)
+                .add_modifier(Modifier::BOLD),
+        ));
+        line.push(Span::raw(" "));
+        line.push(Span::styled(
+            RECEIVED_FOLDER_BUTTON_TEXT,
+            Style::default()
+                .fg(theme.bg)
+                .bg(folder_bg)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    ListItem::new(Line::from(line))
 }
+
+fn max_received_entries_for_area(list_area: Rect) -> usize {
+    let inner = inner_block_area(list_area);
+    (inner.height as usize) / 2
+}
+
+fn build_received_view<'a>(received: &'a [IncomingEntry], max_entries: usize) -> Vec<&'a IncomingEntry> {
+    received.iter().rev().take(max_entries).collect()
+}
+
+
 
 fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     let theme = Theme::default_dark();
@@ -1135,19 +1329,25 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
         .split(body[1]);
 
-    let received_items = app
-        .received
-        .iter()
-        .rev()
-        .take(20)
-        .map(|e| render_incoming_item(theme, e))
-        .collect::<Vec<_>>();
+    let max_entries = max_received_entries_for_area(right[0]).min(20);
+    let received_view = build_received_view(&app.received, max_entries);
+    let mut received_items = Vec::new();
+    for (entry_idx, entry) in received_view.iter().enumerate() {
+        received_items.push(render_incoming_info_line(theme, entry, right[0]));
+        received_items.push(render_incoming_action_line(
+            theme,
+            entry,
+            right[0],
+            entry_idx * 2 + 1,
+            app.last_mouse,
+        ));
+    }
 
     let received = List::new(received_items)
         .block(block_with_title(theme, "recebendo (entrada)"))
         .style(Style::default().bg(theme.panel));
 
-    app.received_click_targets = build_received_click_targets(right[0], &app.received);
+    app.received_click_targets = build_received_click_targets(right[0], &received_view);
     frame.render_widget(received, right[0]);
 
     app.logs_area = right[1];
@@ -1586,52 +1786,125 @@ fn inner_block_area(area: Rect) -> Rect {
     }
 }
 
-fn incoming_item_rect(list_area: Rect, idx: usize) -> Rect {
+#[derive(Clone)]
+struct ReceivedClickTarget {
+    area: Rect,
+    path: PathBuf,
+    action: ReceivedClickAction,
+}
+
+#[derive(Clone, Copy)]
+enum ReceivedClickAction {
+    Open,
+    RevealInFolder,
+}
+
+fn received_open_button_rect(list_area: Rect, idx: usize) -> Rect {
     let inner = inner_block_area(list_area);
-    if inner.height == 0 || idx >= inner.height as usize {
+    let open_w = RECEIVED_OPEN_BUTTON_TEXT.chars().count() as u16;
+    let folder_w = RECEIVED_FOLDER_BUTTON_TEXT.chars().count() as u16;
+    let total_w = open_w + 1 + folder_w;
+    if inner.width <= total_w || inner.height == 0 || idx >= inner.height as usize {
         return Rect::default();
     }
     Rect {
-        x: inner.x,
+        x: inner.x + (inner.width - total_w),
         y: inner.y + idx as u16,
-        width: inner.width,
+        width: open_w,
+        height: 1,
+    }
+}
+
+fn received_folder_button_rect(list_area: Rect, idx: usize) -> Rect {
+    let inner = inner_block_area(list_area);
+    let open_w = RECEIVED_OPEN_BUTTON_TEXT.chars().count() as u16;
+    let folder_w = RECEIVED_FOLDER_BUTTON_TEXT.chars().count() as u16;
+    let total_w = open_w + 1 + folder_w;
+    if inner.width <= total_w || inner.height == 0 || idx >= inner.height as usize {
+        return Rect::default();
+    }
+    Rect {
+        x: inner.x + (inner.width - total_w) + open_w + 1,
+        y: inner.y + idx as u16,
+        width: folder_w,
         height: 1,
     }
 }
 
 fn build_received_click_targets(
     list_area: Rect,
-    received: &[IncomingEntry],
-) -> Vec<(Rect, PathBuf)> {
+    received: &[&IncomingEntry],
+) -> Vec<ReceivedClickTarget> {
     let inner = inner_block_area(list_area);
     if inner.height == 0 || inner.width == 0 {
         return Vec::new();
     }
 
-    let visible = received.iter().rev().take(20).collect::<Vec<_>>();
-    let max_rows = inner.height as usize;
-
     let mut out = Vec::new();
-    for (idx, entry) in visible.into_iter().enumerate().take(max_rows) {
+    for (entry_idx, entry) in received.iter().copied().enumerate() {
         if !matches!(entry.status, IncomingStatus::Done) {
             continue;
         }
         if !entry.path.exists() {
             continue;
         }
-        out.push((incoming_item_rect(list_area, idx), entry.path.clone()));
+
+        let action_row = entry_idx * 2 + 1;
+        let open_rect = received_open_button_rect(list_area, action_row);
+        if open_rect.width > 0 {
+            out.push(ReceivedClickTarget {
+                area: open_rect,
+                path: entry.path.clone(),
+                action: ReceivedClickAction::Open,
+            });
+        }
+
+        let folder_rect = received_folder_button_rect(list_area, action_row);
+        if folder_rect.width > 0 {
+            out.push(ReceivedClickTarget {
+                area: folder_rect,
+                path: entry.path.clone(),
+                action: ReceivedClickAction::RevealInFolder,
+            });
+        }
     }
     out
+}
+
+fn truncate_keep_end(text: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    if max <= 3 {
+        return text
+            .chars()
+            .rev()
+            .take(max)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+    }
+
+    let tail_len = max - 3;
+    let tail = text
+        .chars()
+        .rev()
+        .take(tail_len)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    format!("...{tail}")
 }
 
 fn open_path_in_default_app(path: &std::path::Path) -> io::Result<()> {
     #[cfg(target_os = "windows")]
     {
-        let path = path.to_string_lossy();
-        let quoted = format!("\"{path}\"");
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &quoted])
-            .spawn()?;
+        std::process::Command::new("explorer").arg(path).spawn()?;
         return Ok(());
     }
 
@@ -1644,6 +1917,30 @@ fn open_path_in_default_app(path: &std::path::Path) -> io::Result<()> {
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         std::process::Command::new("xdg-open").arg(path).spawn()?;
+        return Ok(());
+    }
+}
+
+fn reveal_path_in_file_manager(path: &std::path::Path) -> io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg("/select,")
+            .arg(path)
+            .spawn()?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").args(["-R"]).arg(path).spawn()?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let dir = path.parent().unwrap_or(path);
+        std::process::Command::new("xdg-open").arg(dir).spawn()?;
         return Ok(());
     }
 }

@@ -470,7 +470,14 @@ fn make_endpoint(
     let server_config = make_server_config(cert_der.clone(), priv_key.clone())?;
     let client_config = make_client_config();
 
-    let socket = std::net::UdpSocket::bind(bind_addr)?;
+    let socket = match std::net::UdpSocket::bind(bind_addr) {
+        Ok(socket) => socket,
+        Err(err) if err.kind() == io::ErrorKind::AddrInUse && bind_addr.port() != 0 => {
+            let fallback = SocketAddr::new(bind_addr.ip(), 0);
+            std::net::UdpSocket::bind(fallback)?
+        }
+        Err(err) => return Err(Box::new(err)),
+    };
     let local_addr = socket.local_addr()?;
     let stun_result = stun::detect_public_endpoint_on_socket(&socket, local_addr);
     let _ = socket.set_read_timeout(None);

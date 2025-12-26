@@ -1,109 +1,51 @@
 transporte QUIC: streams confiaveis com TLS 1.3
 dados de arquivo: streams unidirecionais com chunks de 1024 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55149
-reconfigurando bind para 0.0.0.0:55149
-endpoint publico 152.237.164.251:60203
-reconfigurando bind para [::]:55149
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55149
-reconfigurando bind para 0.0.0.0:55149
-endpoint publico 152.237.164.251:60203
-reconfigurando bind para [::]:55149
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55149
-reconfigurando bind para 0.0.0.0:55149
-endpoint publico 152.237.164.251:60203
-reconfigurando bind para [::]:55149
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55149
-reconfigurando bind para 0.0.0.0:55149
-endpoint publico 152.237.164.251:60203
-reconfigurando bind para [::]:55149
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55149
-reconfigurando bind para 0.0.0.0:55149
-endpoint publico 152.237.164.251:57683
-reconfigurando bind para [::]:55149
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55149
-reconfigurando bind para 0.0.0.0:55149
-endpoint publico 152.237.164.251:57683
-reconfigurando bind para [::]:55149
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55149
-reconfigurando bind para 0.0.0.0:55149
-endpoint publico 152.237.164.251:57683
-reconfigurando bind para [::]:55149
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55149
-reconfigurando bind para 0.0.0.0:55149
-endpoint publico 152.237.164.251:57683
-transporte QUIC: streams confiaveis com TLS 1.3
-dados de arquivo: streams unidirecionais com chunks de 1024 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:51864
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:49941
+reconfigurando bind para 0.0.0.0:49941
+endpoint publico 152.237.164.251:59277
 ip colado
-endereco do parceiro invalido
-reconfigurando bind para 0.0.0.0:51864
-endpoint publico 152.237.164.251:60640
-ip colado
-endereco do parceiro invalido
-ip colado
-conectando 187.73.0.200:44288
-copiado 152.237.164.251:60640
-erro ao conectar timed out
-conectado 187.73.0.200:44288
-conectado 187.73.0.200:44288
-erro ao aceitar detected an error with protocol compliance that was not covered by more specific error codes: authentication failed
+conectando 192.168.100.141:64168
+conectado 192.168.100.141:64168
 enviado C:\Users\gaok1\Downloads\ChatGPT Image 25 de dez. de 2025, 09_22_58.png
-enviado C:\Users\gaok1\Downloads\ChatGPT Image 24 de dez. de 2025, 22_48_40.png
+diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-34-21
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-34-21\pong.rar
+recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-34-21\pong.rar
 transporte QUIC: streams confiaveis com TLS 1.3
 dados de arquivo: streams unidirecionais com chunks de 1024 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55872
-mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
-mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
-mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
-mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-copiado [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55872
-mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
-mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-reconfigurando bind para 0.0.0.0:55872
-endpoint publico 152.237.164.251:57848
-reconfigurando bind para [::]:55872
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55872
-reconfigurando bind para 0.0.0.0:55872
-endpoint publico 152.237.164.251:57848
-reconfigurando bind para [::]:55872
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55872
-reconfigurando bind para 0.0.0.0:55872
-endpoint publico 152.237.164.251:57848
-reconfigurando bind para [::]:55872
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:55872
-reconfigurando bind para 0.0.0.0:55872
-endpoint publico 152.237.164.251:57848
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:64583
+reconfigurando bind para 0.0.0.0:64583
+endpoint publico 152.237.164.251:61407
+ip colado
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:62809
+conectando [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:59000
+conectado [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:59000
+enviado G:\games_mq\pong.rar
 transporte QUIC: streams confiaveis com TLS 1.3
 dados de arquivo: streams unidirecionais com chunks de 1024 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:61104
-mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
-mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
-mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
-mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
-mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
-mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
-mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-reconfigurando bind para 0.0.0.0:61104
-endpoint publico 152.237.164.251:58718
-mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
-mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-cancelamento solicitado
-cancelamento solicitado
-cancelamento solicitado
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:51960
+copiado [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:51960
+copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:51960
+copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:51960
+conectado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:49586
+diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-41-55
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-41-55\pong.rar
+recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-41-55\pong.rar
 transporte QUIC: streams confiaveis com TLS 1.3
 dados de arquivo: streams unidirecionais com chunks de 1024 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:54225
-cancelamento solicitado
-cancelamento solicitado
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:52704
+copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:52704
+conectado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:64435
+diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29\pong.rar
+recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29\pong.rar
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29\pong.rar
+recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29\pong.rar
+abrindo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29\pong.rar
 transporte QUIC: streams confiaveis com TLS 1.3
 dados de arquivo: streams unidirecionais com chunks de 1024 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:53464
-cancelamento solicitado
-cancelamento solicitado
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:64242
+copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:64242
+conectado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:61979
+diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-46-51
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-46-51\pong.rar
+recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-46-51\pong.rar
