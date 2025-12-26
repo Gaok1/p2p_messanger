@@ -7,22 +7,20 @@ use std::{
 };
 
 use chrono::Local;
+use quinn::{ReadError, RecvStream, VarInt};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
     sync::mpsc as tokio_mpsc,
+    task,
 };
 
-use super::{
-    NetCommand, NetEvent, WireMessage, serialize_message,
-};
+use super::{NetCommand, NetEvent, WireMessage, serialize_message};
 
 /// Representa um arquivo que está chegando do par.
-pub(crate) struct IncomingFile {
-    pub file: File,
+pub(crate) struct IncomingTransfer {
     pub path: PathBuf,
-    pub size: u64,
-    pub bytes_written: u64,
+    pub handle: tokio::task::JoinHandle<()>,
 }
 
 #[derive(Clone, Copy)]
@@ -40,7 +38,7 @@ pub(crate) async fn handle_incoming_message(
     from: SocketAddr,
     peer_addr: &mut Option<SocketAddr>,
     session_dir: &mut Option<PathBuf>,
-    incoming: &mut HashMap<u64, IncomingFile>,
+    incoming: &mut HashMap<u64, IncomingTransfer>,
     evt_tx: &Sender<NetEvent>,
 ) -> bool {
     let mut new_peer = false;
@@ -58,15 +56,11 @@ pub(crate) async fn handle_incoming_message(
             }
         }
         WireMessage::Punch { .. } => {
-            let _ = send_message(
-                connection,
-                &WireMessage::Hello { version: 1 },
-                evt_tx,
-            )
-            .await;
+            let _ = send_message(connection, &WireMessage::Hello { version: 1 }, evt_tx).await;
         }
         WireMessage::Cancel { file_id } => {
             if let Some(entry) = incoming.remove(&file_id) {
+                entry.handle.abort();
                 let _ = tokio::fs::remove_file(&entry.path).await;
                 let _ = evt_tx.send(NetEvent::ReceiveCanceled {
                     file_id,
@@ -74,82 +68,101 @@ pub(crate) async fn handle_incoming_message(
                 });
             }
         }
-        WireMessage::FileMeta {
-            file_id,
-            name,
-            size,
-        } => {
-            let dir = match ensure_session_dir(session_dir, evt_tx).await {
-                Ok(dir) => dir,
-                Err(err) => {
-                    let _ = evt_tx.send(NetEvent::Log(format!("erro na sessao {err}")));
-                    return new_peer;
-                }
-            };
-            let safe_name = sanitize_file_name(&name);
-            let path = dir.join(safe_name);
-            match File::create(&path).await {
-                Ok(file) => {
-                    let _ = evt_tx.send(NetEvent::ReceiveStarted {
-                        file_id,
-                        path: path.clone(),
-                        size,
-                    });
-                    incoming.insert(
-                        file_id,
-                        IncomingFile {
-                            file,
-                            path: path.clone(),
-                            size,
-                            bytes_written: 0,
-                        },
-                    );
-                    let _ = evt_tx.send(NetEvent::Log(format!("recebendo {}", path.display())));
-                }
-                Err(err) => {
-                    let _ = evt_tx.send(NetEvent::Log(format!("erro ao criar arquivo {err}")));
-                }
-            }
-        }
-        WireMessage::FileChunk { file_id, data } => {
-            if let Some(entry) = incoming.get_mut(&file_id) {
-                match entry.file.write_all(&data).await {
-                    Ok(()) => {
-                        entry.bytes_written += data.len() as u64;
-                        let _ = evt_tx.send(NetEvent::ReceiveProgress {
-                            file_id,
-                            bytes_received: entry.bytes_written,
-                            size: entry.size,
-                        });
-                    }
-                    Err(err) => {
-                        let _ = evt_tx.send(NetEvent::Log(format!("erro ao gravar {err}")));
-                    }
-                }
-            }
-        }
-        WireMessage::FileDone { file_id } => {
-            if let Some(entry) = incoming.get(&file_id) {
-                if entry.bytes_written == entry.size {
-                    let _ = evt_tx.send(NetEvent::FileReceived {
-                        file_id,
-                        path: entry.path.clone(),
-                    });
-                } else {
-                    let _ = evt_tx.send(NetEvent::Log(format!(
-                        "tamanho divergente {} bytes",
-                        entry.bytes_written
-                    )));
-                }
-            }
-            incoming.remove(&file_id);
-        }
+        _ => {}
     }
 
     new_peer
 }
 
-async fn ensure_session_dir(
+pub(crate) async fn handle_incoming_stream(
+    file_id: u64,
+    name: String,
+    size: u64,
+    mut stream: RecvStream,
+    session_dir: &mut Option<PathBuf>,
+    incoming: &mut HashMap<u64, IncomingTransfer>,
+    evt_tx: &Sender<NetEvent>,
+    completion_tx: tokio_mpsc::UnboundedSender<u64>,
+) -> io::Result<()> {
+    let dir = ensure_session_dir(session_dir, evt_tx).await?;
+    let safe_name = sanitize_file_name(&name);
+    let path = dir.join(safe_name);
+    let file = File::create(&path).await?;
+
+    let _ = evt_tx.send(NetEvent::ReceiveStarted {
+        file_id,
+        path: path.clone(),
+        size,
+    });
+    let _ = evt_tx.send(NetEvent::Log(format!("recebendo {}", path.display())));
+
+    let evt_tx = evt_tx.clone();
+    let completion = completion_tx.clone();
+    let task_path = path.clone();
+    let handle = task::spawn(async move {
+        let mut file = file;
+        let mut received = 0u64;
+        let mut buffer = vec![0u8; 64 * 1024];
+
+        loop {
+            match stream.read(&mut buffer).await {
+                Ok(Some(n)) if n == 0 => {
+                    break;
+                }
+                Ok(Some(n)) => {
+                    if let Err(err) = file.write_all(&buffer[..n]).await {
+                        let _ = evt_tx.send(NetEvent::Log(format!("erro ao gravar {err}")));
+                        let _ = tokio::fs::remove_file(&task_path).await;
+                        let _ = completion.send(file_id);
+                        return;
+                    }
+                    received += n as u64;
+                    let _ = evt_tx.send(NetEvent::ReceiveProgress {
+                        file_id,
+                        bytes_received: received,
+                        size,
+                    });
+                }
+                Ok(None) => {
+                    if received == size {
+                        let _ = evt_tx.send(NetEvent::FileReceived {
+                            file_id,
+                            path: task_path.clone(),
+                        });
+                    } else {
+                        let _ = evt_tx.send(NetEvent::Log(format!(
+                            "tamanho divergente {received} bytes (esperado {size})"
+                        )));
+                    }
+                    break;
+                }
+                Err(ReadError::Reset(_)) => {
+                    let _ = evt_tx.send(NetEvent::ReceiveCanceled {
+                        file_id,
+                        path: task_path.clone(),
+                    });
+                    let _ = tokio::fs::remove_file(&task_path).await;
+                    let _ = completion.send(file_id);
+                    return;
+                }
+                Err(err) => {
+                    let _ = evt_tx.send(NetEvent::Log(format!("erro na leitura do stream {err}")));
+                    let _ = tokio::fs::remove_file(&task_path).await;
+                    let _ = completion.send(file_id);
+                    return;
+                }
+            }
+        }
+
+        let _ = completion.send(file_id);
+    });
+
+    incoming.insert(file_id, IncomingTransfer { path, handle });
+
+    Ok(())
+}
+
+pub(crate) async fn ensure_session_dir(
     session_dir: &mut Option<PathBuf>,
     evt_tx: &Sender<NetEvent>,
 ) -> io::Result<PathBuf> {
@@ -277,7 +290,11 @@ pub(crate) async fn send_files(
 
         let _ = write_wire_message_framed(
             &mut stream,
-            &WireMessage::FileMeta { file_id, name, size },
+            &WireMessage::FileMeta {
+                file_id,
+                name,
+                size,
+            },
             evt_tx,
         )
         .await;
@@ -289,21 +306,18 @@ pub(crate) async fn send_files(
 
         let mut buffer = vec![0u8; chunk_size];
         let mut sent_bytes = 0u64;
+        let mut success = true;
         loop {
             let read = file.read(&mut buffer).await?;
             if read == 0 {
                 break;
             }
 
-            let _ = write_wire_message_framed(
-                &mut stream,
-                &WireMessage::FileChunk {
-                    file_id,
-                    data: buffer[..read].to_vec(),
-                },
-                evt_tx,
-            )
-            .await;
+            if let Err(err) = stream.write_all(&buffer[..read]).await {
+                let _ = evt_tx.send(NetEvent::Log(format!("erro ao enviar {err}")));
+                success = false;
+                break;
+            }
             sent_bytes += read as u64;
             let _ = evt_tx.send(NetEvent::SendProgress {
                 file_id,
@@ -313,13 +327,9 @@ pub(crate) async fn send_files(
 
             match handle_send_control(cmd_rx, pending_cmds) {
                 SendOutcome::Canceled => {
-                    let _ = write_wire_message_framed(
-                        &mut stream,
-                        &WireMessage::Cancel { file_id },
-                        evt_tx,
-                    )
-                    .await;
-                    let _ = stream.finish();
+                    let _ = stream.reset(VarInt::from_u32(0));
+                    let _ =
+                        send_message(connection, &WireMessage::Cancel { file_id }, evt_tx).await;
                     let _ = evt_tx.send(NetEvent::SendCanceled {
                         file_id,
                         path: path.clone(),
@@ -327,25 +337,22 @@ pub(crate) async fn send_files(
                     return Ok(SendOutcome::Canceled);
                 }
                 SendOutcome::Shutdown => {
-                    let _ = write_wire_message_framed(
-                        &mut stream,
-                        &WireMessage::Cancel { file_id },
-                        evt_tx,
-                    )
-                    .await;
-                    let _ = stream.finish();
+                    let _ = stream.reset(VarInt::from_u32(0));
+                    let _ =
+                        send_message(connection, &WireMessage::Cancel { file_id }, evt_tx).await;
                     return Ok(SendOutcome::Shutdown);
                 }
                 SendOutcome::Completed => {}
             }
         }
 
-        let _ = write_wire_message_framed(&mut stream, &WireMessage::FileDone { file_id }, evt_tx).await;
-        let _ = stream.finish();
-        let _ = evt_tx.send(NetEvent::FileSent {
-            file_id,
-            path: path.clone(),
-        });
+        if success {
+            let _ = stream.finish();
+            let _ = evt_tx.send(NetEvent::FileSent {
+                file_id,
+                path: path.clone(),
+            });
+        }
     }
 
     Ok(SendOutcome::Completed)
