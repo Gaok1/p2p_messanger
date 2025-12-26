@@ -187,7 +187,7 @@ async fn run_network_async(
     let mut pending_cmds: Vec<NetCommand> = Vec::new();
 
     let (mut endpoint, _cert, initial_stun) = loop {
-        match make_endpoint(bind_addr) {
+        match make_endpoint(bind_addr, Some(&evt_tx)) {
             Ok(ctx) => break ctx,
             Err(err) => {
                 let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir endpoint {err}")));
@@ -265,7 +265,7 @@ async fn run_network_async(
                     Some(NetCommand::Rebind(new_bind)) => {
                         if new_bind != bind_addr {
                             let _ = evt_tx.send(NetEvent::Log(format!("reconfigurando bind para {new_bind}")));
-                            match make_endpoint(new_bind) {
+                            match make_endpoint(new_bind, Some(&evt_tx)) {
                                 Ok((new_endpoint, _, stun_res)) => {
                                     endpoint = new_endpoint;
                                     bind_addr = endpoint.local_addr().unwrap_or(new_bind);
@@ -382,7 +382,7 @@ async fn handle_command(
                 } else {
                     SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
                 };
-                match make_endpoint(new_bind) {
+                match make_endpoint(new_bind, Some(evt_tx)) {
                     Ok((new_endpoint, _, stun_res)) => {
                         *endpoint = new_endpoint;
                         *bind_addr = endpoint.local_addr().unwrap_or(new_bind);
@@ -462,6 +462,7 @@ fn log_transport_config(evt_tx: &Sender<NetEvent>) {
 
 fn make_endpoint(
     bind_addr: SocketAddr,
+    evt_tx: Option<&Sender<NetEvent>>,
 ) -> Result<(Endpoint, Vec<u8>, Result<Option<SocketAddr>, String>), Box<dyn std::error::Error>> {
     let cert = rcgen::generate_simple_self_signed(["pasta-p2p.local".into()])?;
     let cert_der = cert.serialize_der()?;
@@ -479,7 +480,27 @@ fn make_endpoint(
         Err(err) => return Err(Box::new(err)),
     };
     let local_addr = socket.local_addr()?;
-    let stun_result = stun::detect_public_endpoint_on_socket(&socket, local_addr);
+    let stun_result = match evt_tx {
+        Some(evt_tx) if stun::stun_trace_enabled() => {
+            stun::detect_public_endpoint_on_socket_with_trace(&socket, local_addr, |line| {
+                let _ = evt_tx.send(NetEvent::Log(line));
+            })
+        }
+        Some(evt_tx) => {
+            let mut trace_lines: Vec<String> = Vec::new();
+            let result =
+                stun::detect_public_endpoint_on_socket_with_trace(&socket, local_addr, |line| {
+                    trace_lines.push(line);
+                });
+            if result.is_err() {
+                for line in trace_lines {
+                    let _ = evt_tx.send(NetEvent::Log(line));
+                }
+            }
+            result
+        }
+        None => stun::detect_public_endpoint_on_socket(&socket, local_addr),
+    };
     let _ = socket.set_read_timeout(None);
 
     let mut endpoint = Endpoint::new(
@@ -586,7 +607,7 @@ mod endpoint_tests {
         let runtime = tokio::runtime::Runtime::new().expect("runtime");
         runtime.block_on(async {
             let bind_addr: SocketAddr = "127.0.0.1:0".parse().expect("addr");
-            let result = make_endpoint(bind_addr);
+            let result = make_endpoint(bind_addr, None);
             assert!(
                 result.is_ok(),
                 "expected endpoint creation to succeed, got {result:?}"
@@ -600,11 +621,11 @@ mod endpoint_tests {
         runtime.block_on(async {
             let (evt_tx, _evt_rx) = std::sync::mpsc::channel::<NetEvent>();
 
-            let (server, _, _) = make_endpoint("127.0.0.1:0".parse().expect("server bind"))
+            let (server, _, _) = make_endpoint("127.0.0.1:0".parse().expect("server bind"), None)
                 .expect("server endpoint");
             let server_addr = server.local_addr().expect("server addr");
 
-            let (mut client, _, _) = make_endpoint("127.0.0.1:0".parse().expect("client bind"))
+            let (mut client, _, _) = make_endpoint("127.0.0.1:0".parse().expect("client bind"), None)
                 .expect("client endpoint");
 
             let accept_fut = async {

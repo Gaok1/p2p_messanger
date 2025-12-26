@@ -1,59 +1,99 @@
 transporte QUIC: streams confiaveis com TLS 1.3
-dados de arquivo: streams unidirecionais com chunks de 1024 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:49941
-reconfigurando bind para 0.0.0.0:49941
-endpoint publico 152.237.164.251:59277
-ip colado
-conectando 192.168.100.141:64168
-conectado 192.168.100.141:64168
-enviado C:\Users\gaok1\Downloads\ChatGPT Image 25 de dez. de 2025, 09_22_58.png
-diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-34-21
-recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-34-21\pong.rar
-recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-34-21\pong.rar
-transporte QUIC: streams confiaveis com TLS 1.3
-dados de arquivo: streams unidirecionais com chunks de 1024 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:64583
-reconfigurando bind para 0.0.0.0:64583
-endpoint publico 152.237.164.251:61407
-ip colado
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:62809
-conectando [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:59000
-conectado [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:59000
-enviado G:\games_mq\pong.rar
-transporte QUIC: streams confiaveis com TLS 1.3
-dados de arquivo: streams unidirecionais com chunks de 1024 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:51960
-copiado [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:51960
-copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:51960
-copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:51960
-conectado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:49586
-diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-41-55
-recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-41-55\pong.rar
-recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-41-55\pong.rar
-transporte QUIC: streams confiaveis com TLS 1.3
-dados de arquivo: streams unidirecionais com chunks de 1024 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:52704
-copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:52704
-conectado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:64435
-diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29
-recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29\pong.rar
-recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29\pong.rar
-recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29\pong.rar
-recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29\pong.rar
-abrindo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-44-29\pong.rar
-transporte QUIC: streams confiaveis com TLS 1.3
-dados de arquivo: streams unidirecionais com chunks de 1024 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:64242
-copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:64242
-conectado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:61979
-diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-46-51
-recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-46-51\pong.rar
-recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-46-51\pong.rar
+dados de arquivo: streams unidirecionais com chunks de 16384 bytes
+stun erro STUN sem resposta (enviados: 7), destinos: [2606:4700:49::]:3478, [2001:4860:4864:5:8000::1]:19302, [2001:4860:4864:5:8000::1]:19302, [2001:4860:4864:5:8000::1]:19302, [2001:4860:4864:5:8000::1]:19302, [2001:4860:4864:5:8000::1]:19302, ...
 transporte QUIC: streams confiaveis com TLS 1.3
 dados de arquivo: streams unidirecionais com chunks de 16384 bytes
-endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:53268
-copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:53268
-conectado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:56829
-diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_00-02-43
-recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_00-02-43\pong.rar
-recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_00-02-43\pong.rar
+stun trace: start bind=[::]:58812 read_timeout=200ms
+stun trace: servers=stun.cloudflare.com:3478, stun.l.google.com:19302, stun1.l.google.com:19302, stun2.l.google.com:19302, stun3.l.google.com:19302, stun4.l.google.com:19302, stun.nextcloud.com:443
+stun trace: resolve stun.cloudflare.com:3478 -> [2606:4700:49::]:3478
+stun trace: send server=stun.cloudflare.com:3478 to=[2606:4700:49::]:3478 txid=000000001884c9b155e638c9 bytes=20
+stun trace: resolve stun.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
+stun trace: send server=stun.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b155e638ca bytes=20
+stun trace: resolve stun1.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
+stun trace: send server=stun1.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b155e638cb bytes=20
+stun trace: resolve stun2.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
+stun trace: send server=stun2.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b155e638cc bytes=20
+stun trace: resolve stun3.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
+stun trace: send server=stun3.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b155e638cd bytes=20
+stun trace: resolve stun4.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
+stun trace: send server=stun4.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b155e638ce bytes=20
+stun trace: resolve stun.nextcloud.com:443 -> [2a01:4f8:c17:8f74::1]:443
+stun trace: send server=stun.nextcloud.com:443 to=[2a01:4f8:c17:8f74::1]:443 txid=000000001884c9b155e638cf bytes=20
+stun trace: TIMEOUT elapsed=7229ms sent=7 recv=0 parsed=0
+stun erro STUN sem resposta (bind=[::]:58812, enviados: 7, recebidos: 0, parsed: 0, elapsed=7229ms), destinos: [2606:4700:49::]:3478, [2001:4860:4864:5:8000::1]:19302 (x5), [2a01:4f8:c17:8f74::1]:443
+reconfigurando bind para 0.0.0.0:58812
+endpoint publico 152.237.164.251:60594
+reconfigurando bind para [::]:58812
+stun trace: start bind=[::]:58812 read_timeout=200ms
+stun trace: servers=stun.cloudflare.com:3478, stun.l.google.com:19302, stun1.l.google.com:19302, stun2.l.google.com:19302, stun3.l.google.com:19302, stun4.l.google.com:19302, stun.nextcloud.com:443
+stun trace: resolve stun.cloudflare.com:3478 -> [2606:4700:49::]:3478
+stun trace: send server=stun.cloudflare.com:3478 to=[2606:4700:49::]:3478 txid=000000001884c9b64cc726bd bytes=20
+stun trace: resolve stun.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
+stun trace: send server=stun.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b64cc726be bytes=20
+stun trace: resolve stun1.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
+stun trace: send server=stun1.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b64cc726bf bytes=20
+stun trace: resolve stun2.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
+stun trace: send server=stun2.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b64cc726c0 bytes=20
+stun trace: resolve stun3.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
+stun trace: send server=stun3.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b64cc726c1 bytes=20
+stun trace: resolve stun4.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
+stun trace: send server=stun4.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b64cc726c2 bytes=20
+stun trace: resolve stun.nextcloud.com:443 -> [2a01:4f8:c17:8f74::1]:443
+stun trace: send server=stun.nextcloud.com:443 to=[2a01:4f8:c17:8f74::1]:443 txid=000000001884c9b64cc726c3 bytes=20
+stun trace: TIMEOUT elapsed=7109ms sent=7 recv=0 parsed=0
+stun erro STUN sem resposta (bind=[::]:58812, enviados: 7, recebidos: 0, parsed: 0, elapsed=7109ms), destinos: [2606:4700:49::]:3478, [2001:4860:4864:5:8000::1]:19302 (x5), [2a01:4f8:c17:8f74::1]:443
+transporte QUIC: streams confiaveis com TLS 1.3
+dados de arquivo: streams unidirecionais com chunks de 16384 bytes
+endpoint publico [2804:d45:9a05:f400:a5c0:7216:31a8:44f8]:62834
+reconfigurando bind para 0.0.0.0:62834
+endpoint publico 152.237.164.251:58772
+reconfigurando bind para [::]:62834
+endpoint publico [2804:d45:9a05:f400:a5c0:7216:31a8:44f8]:62834
+reconfigurando bind para 0.0.0.0:62834
+endpoint publico 152.237.164.251:58772
+reconfigurando bind para [::]:62834
+endpoint publico [2804:d45:9a05:f400:a5c0:7216:31a8:44f8]:62834
+reconfigurando bind para 0.0.0.0:62834
+endpoint publico 152.237.164.251:58772
+reconfigurando bind para [::]:62834
+endpoint publico [2804:d45:9a05:f400:a5c0:7216:31a8:44f8]:62834
+transporte QUIC: streams confiaveis com TLS 1.3
+dados de arquivo: streams unidirecionais com chunks de 16384 bytes
+endpoint publico [2804:d45:9a05:f400:a5c0:7216:31a8:44f8]:55456
+mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
+mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
+reconfigurando bind para 0.0.0.0:55456
+endpoint publico 152.237.164.251:58558
+copiado 152.237.164.251:58558
+ip colado
+conectando 177.137.82.48:24287
+erro ao conectar timed out
+copiado 152.237.164.251:58558
+erro ao aceitar timed out
+reconfigurando bind para [::]:55456
+endpoint publico [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:55456
+reconfigurando bind para 0.0.0.0:55456
+endpoint publico 152.237.164.251:58558
+copiado 152.237.164.251:58558
+conectado 177.137.82.48:24583
+enviado C:\Users\gaok1\Downloads\docs\GOJO.jpg
+enviado C:\Users\gaok1\Downloads\docs\1dc863b0-9d13-43a7-bc3f-128a11b0bb0d.jpg
+enviado C:\Users\gaok1\Downloads\docs\3.png
+enviado C:\Users\gaok1\Downloads\docs\3c11066d-b2d0-4396-a1f8-16a006a136ac.jpg
+enviado C:\Users\gaok1\Downloads\docs\5f7a1d05-7e3e-4a9b-ac95-4ead4189f22d.jpg
+diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.21 - 20.39.47.04.mp4
+cancelamento solicitado
+cancelamento solicitado
+recebimento cancelado C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.21 - 20.39.47.04.mp4
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.12 - 16.55.57.01.mp4
+recebimento cancelado C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.12 - 16.55.57.01.mp4
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.12 - 16.55.57.01.mp4
+recebimento cancelado C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.12 - 16.55.57.01.mp4
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
+recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
+recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
+abrindo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
+abrindo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
+abrindo pasta C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
