@@ -10,16 +10,29 @@ use std::{
 
 use base64::Engine;
 use bincode::Options;
-use quinn::{Endpoint, EndpointConfig, ServerConfig};
+use quinn::{Endpoint, EndpointConfig, RecvStream, ServerConfig};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc as tokio_mpsc;
 
 mod stun;
 mod transfer;
 
-use transfer::{IncomingFile, SendOutcome, handle_incoming_message, send_files};
+use transfer::{
+    IncomingTransfer, SendOutcome, handle_incoming_message, handle_incoming_stream, send_files,
+};
 
-const CHUNK_SIZE: usize = 16 * 1024;
+const CHUNK_SIZE: usize = 64 * 1024;
+
+enum InboundFrame {
+    Control(WireMessage, SocketAddr),
+    FileStream {
+        file_id: u64,
+        name: String,
+        size: u64,
+        from: SocketAddr,
+        stream: RecvStream,
+    },
+}
 
 /// Mensagens enviadas pela camada de rede para trafegar os arquivos.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -196,7 +209,9 @@ async fn run_network_async(
                     Some(NetCommand::Rebind(new_bind)) => {
                         if new_bind != bind_addr {
                             bind_addr = new_bind;
-                            let _ = evt_tx.send(NetEvent::Log("stun sera executado ao reabrir endpoint".to_string()));
+                            let _ = evt_tx.send(NetEvent::Log(
+                                "stun sera executado ao reabrir endpoint".to_string(),
+                            ));
                         }
                     }
                     Some(NetCommand::Shutdown) | None => return Ok(()),
@@ -214,21 +229,17 @@ async fn run_network_async(
 
     let mut connected_peer: Option<SocketAddr> = None;
     let mut session_dir: Option<PathBuf> = None;
-    let mut incoming: HashMap<u64, IncomingFile> = HashMap::new();
+    let mut incoming: HashMap<u64, IncomingTransfer> = HashMap::new();
     let mut next_file_id = 1u64;
-    let (mut inbound_tx, mut inbound_rx) = tokio_mpsc::unbounded_channel::<(WireMessage, SocketAddr)>();
+    let (mut inbound_tx, mut inbound_rx) = tokio_mpsc::unbounded_channel::<InboundFrame>();
+    let (completion_tx, mut completion_rx) = tokio_mpsc::unbounded_channel::<u64>();
     let mut reader_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut connection: Option<quinn::Connection> = None;
 
     if let Some(peer) = initial_peer {
         let _ = evt_tx.send(NetEvent::PeerConnecting(peer));
         if let Some(conn) = connect_peer(&mut endpoint, peer, &evt_tx).await {
-            setup_connection_reader(
-                conn.clone(),
-                &mut inbound_tx,
-                &evt_tx,
-                &mut reader_task,
-            );
+            setup_connection_reader(conn.clone(), &mut inbound_tx, &evt_tx, &mut reader_task);
             connected_peer = Some(conn.remote_address());
             connection = Some(conn);
             let _ = evt_tx.send(NetEvent::PeerConnected(peer));
@@ -324,28 +335,52 @@ async fn run_network_async(
                     }
                 }
             }
-            Some((message, from)) = async {
-                match inbound_rx.recv().await {
-                    Some(msg) => Some(msg),
-                    None => None,
-                }
-            } => {
-                if let Some(conn) = connection.as_ref() {
-                    let new_peer = handle_incoming_message(
-                        conn,
-                        message,
-                        from,
-                        &mut connected_peer,
-                        &mut session_dir,
-                        &mut incoming,
-                        &evt_tx,
-                    ).await;
-                    if new_peer {
-                        let _ = evt_tx.send(NetEvent::PeerConnected(from));
+            Some(inbound) = async { inbound_rx.recv().await } => {
+                match inbound {
+                    InboundFrame::Control(message, from) => {
+                        if let Some(conn) = connection.as_ref() {
+                            let new_peer = handle_incoming_message(
+                                conn,
+                                message,
+                                from,
+                                &mut connected_peer,
+                                &mut session_dir,
+                                &mut incoming,
+                                &evt_tx,
+                            ).await;
+                            if new_peer {
+                                let _ = evt_tx.send(NetEvent::PeerConnected(from));
+                            }
+                        } else {
+                            let _ = evt_tx.send(NetEvent::Log("mensagem recebida sem conexao".to_string()));
+                        }
                     }
-                } else {
-                    let _ = evt_tx.send(NetEvent::Log("mensagem recebida sem conexao".to_string()));
+                    InboundFrame::FileStream { file_id, name, size, from, stream } => {
+                        if connection.is_none() {
+                            let _ = evt_tx.send(NetEvent::Log("stream recebido sem conexao".to_string()));
+                            continue;
+                        }
+
+                        if let Err(err) = handle_incoming_stream(
+                            file_id,
+                            name,
+                            size,
+                            stream,
+                            &mut session_dir,
+                            &mut incoming,
+                            &evt_tx,
+                            completion_tx.clone(),
+                        ).await {
+                            let _ = evt_tx.send(NetEvent::Log(format!("erro ao receber stream: {err}")));
+                        } else if connected_peer.is_none() {
+                            connected_peer = Some(from);
+                            let _ = evt_tx.send(NetEvent::PeerConnected(from));
+                        }
+                    }
                 }
+            }
+            Some(done_id) = completion_rx.recv() => {
+                incoming.remove(&done_id);
             }
             else => {
                 break;
@@ -367,7 +402,7 @@ async fn handle_command(
     cmd_rx: &mut tokio_mpsc::UnboundedReceiver<NetCommand>,
     pending_cmds: &mut Vec<NetCommand>,
     endpoint: &mut Endpoint,
-    inbound_tx: &mut tokio_mpsc::UnboundedSender<(WireMessage, SocketAddr)>,
+    inbound_tx: &mut tokio_mpsc::UnboundedSender<InboundFrame>,
     reader_task: &mut Option<tokio::task::JoinHandle<()>>,
 ) -> io::Result<bool> {
     match cmd {
@@ -420,7 +455,9 @@ async fn handle_command(
                     cmd_rx,
                     pending_cmds,
                     CHUNK_SIZE,
-                ).await {
+                )
+                .await
+                {
                     Ok(SendOutcome::Completed) => {}
                     Ok(SendOutcome::Canceled) => {
                         let _ = evt_tx.send(NetEvent::Log("transferencia cancelada".to_string()));
@@ -454,7 +491,9 @@ fn publish_stun_result(result: Result<Option<SocketAddr>, String>, evt_tx: &Send
 }
 
 fn log_transport_config(evt_tx: &Sender<NetEvent>) {
-    let _ = evt_tx.send(NetEvent::Log("transporte QUIC: streams confiaveis com TLS 1.3".to_string()));
+    let _ = evt_tx.send(NetEvent::Log(
+        "transporte QUIC: streams confiaveis com TLS 1.3".to_string(),
+    ));
     let _ = evt_tx.send(NetEvent::Log(format!(
         "dados de arquivo: streams unidirecionais com chunks de {CHUNK_SIZE} bytes"
     )));
@@ -513,7 +552,10 @@ fn make_endpoint(
     Ok((endpoint, cert_der, stun_result))
 }
 
-fn make_server_config(cert_der: Vec<u8>, key_der: Vec<u8>) -> Result<ServerConfig, Box<dyn std::error::Error>> {
+fn make_server_config(
+    cert_der: Vec<u8>,
+    key_der: Vec<u8>,
+) -> Result<ServerConfig, Box<dyn std::error::Error>> {
     use quinn::rustls;
     use std::sync::Arc;
 
@@ -540,7 +582,7 @@ fn make_server_config(cert_der: Vec<u8>, key_der: Vec<u8>) -> Result<ServerConfi
 }
 
 fn make_client_config() -> quinn::ClientConfig {
-    use quinn::rustls::{self, client::danger, DigitallySignedStruct, SignatureScheme};
+    use quinn::rustls::{self, DigitallySignedStruct, SignatureScheme, client::danger};
 
     #[derive(Debug)]
     struct SkipVerifier;
@@ -592,8 +634,8 @@ fn make_client_config() -> quinn::ClientConfig {
 
     crypto.alpn_protocols = vec![b"hq-29".to_vec()];
 
-    let crypto = quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
-        .expect("quic client config");
+    let crypto =
+        quinn::crypto::rustls::QuicClientConfig::try_from(crypto).expect("quic client config");
 
     quinn::ClientConfig::new(std::sync::Arc::new(crypto))
 }
@@ -625,8 +667,9 @@ mod endpoint_tests {
                 .expect("server endpoint");
             let server_addr = server.local_addr().expect("server addr");
 
-            let (mut client, _, _) = make_endpoint("127.0.0.1:0".parse().expect("client bind"), None)
-                .expect("client endpoint");
+            let (mut client, _, _) =
+                make_endpoint("127.0.0.1:0".parse().expect("client bind"), None)
+                    .expect("client endpoint");
 
             let accept_fut = async {
                 let incoming = server.accept().await.expect("incoming");
@@ -648,7 +691,11 @@ mod endpoint_tests {
     }
 }
 
-async fn connect_peer(endpoint: &mut Endpoint, peer: SocketAddr, evt_tx: &Sender<NetEvent>) -> Option<quinn::Connection> {
+async fn connect_peer(
+    endpoint: &mut Endpoint,
+    peer: SocketAddr,
+    evt_tx: &Sender<NetEvent>,
+) -> Option<quinn::Connection> {
     match endpoint.connect(peer, "pasta") {
         Ok(connecting) => match connecting.await {
             Ok(connection) => Some(connection),
@@ -666,7 +713,7 @@ async fn connect_peer(endpoint: &mut Endpoint, peer: SocketAddr, evt_tx: &Sender
 
 fn setup_connection_reader(
     connection: quinn::Connection,
-    inbound_tx: &mut tokio_mpsc::UnboundedSender<(WireMessage, SocketAddr)>,
+    inbound_tx: &mut tokio_mpsc::UnboundedSender<InboundFrame>,
     evt_tx: &Sender<NetEvent>,
     reader_task: &mut Option<tokio::task::JoinHandle<()>>,
 ) {
@@ -675,30 +722,39 @@ fn setup_connection_reader(
     let handle = tokio::spawn(async move {
         loop {
             match connection.accept_uni().await {
-                Ok(mut stream) => {
-                    loop {
-                        match read_frame(&mut stream).await {
-                            Ok(Some(payload)) => match decode_payload(&payload) {
-                                Ok(message) => {
-                                    let _ = inbound.send((message, connection.remote_address()));
-                                }
-                                Err(err) => {
-                                    let base64_preview = base64::engine::general_purpose::STANDARD
-                                        .encode(&payload);
-                                    let preview = base64_preview.chars().take(48).collect::<String>();
-                                    let _ = evt_tx.send(NetEvent::Log(format!(
-                                        "erro ao decodificar {err}; payload(base64)={preview}"
-                                    )));
-                                }
-                            },
-                            Ok(None) => break,
-                            Err(err) => {
-                                let _ = evt_tx.send(NetEvent::Log(format!("stream encerrado {err}")));
-                                break;
-                            }
+                Ok(mut stream) => match read_frame(&mut stream).await {
+                    Ok(Some(payload)) => match decode_payload(&payload) {
+                        Ok(WireMessage::FileMeta {
+                            file_id,
+                            name,
+                            size,
+                        }) => {
+                            let _ = inbound.send(InboundFrame::FileStream {
+                                file_id,
+                                name,
+                                size,
+                                from: connection.remote_address(),
+                                stream,
+                            });
                         }
+                        Ok(message) => {
+                            let _ = inbound
+                                .send(InboundFrame::Control(message, connection.remote_address()));
+                        }
+                        Err(err) => {
+                            let base64_preview =
+                                base64::engine::general_purpose::STANDARD.encode(&payload);
+                            let preview = base64_preview.chars().take(48).collect::<String>();
+                            let _ = evt_tx.send(NetEvent::Log(format!(
+                                "erro ao decodificar {err}; payload(base64)={preview}"
+                            )));
+                        }
+                    },
+                    Ok(None) => {}
+                    Err(err) => {
+                        let _ = evt_tx.send(NetEvent::Log(format!("stream encerrado {err}")));
                     }
-                }
+                },
                 Err(err) => {
                     let _ = evt_tx.send(NetEvent::Log(format!("conexao encerrada {err}")));
                     break;
@@ -718,7 +774,10 @@ async fn read_frame(stream: &mut quinn::RecvStream) -> io::Result<Option<Vec<u8>
             if read_len == 0 {
                 return Ok(None);
             }
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "frame header incompleto"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "frame header incompleto",
+            ));
         }
         read_len += n;
     }
