@@ -9,11 +9,12 @@ const DEFAULT_BIND_IPV6: &str = "[::]:0";
 const DEFAULT_BIND_IPV4: &str = "0.0.0.0:0";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (bind_addr, peer_addr) = parse_args();
-    let (net_tx, net_rx, net_handle) = net::start_network(bind_addr, peer_addr);
+    let args = parse_args();
+    let (net_tx, net_rx, net_handle) =
+        net::start_network(args.bind_addr, args.peer_addr, args.autotune);
 
     let mut terminal = ui::setup_terminal()?;
-    let mut app = ui::AppState::new(bind_addr, peer_addr);
+    let mut app = ui::AppState::new(args.bind_addr, args.peer_addr);
     let run_result = ui::run_app(&mut terminal, &mut app, net_tx.clone(), net_rx);
     ui::restore_terminal(&mut terminal)?;
 
@@ -27,9 +28,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn parse_args() -> (SocketAddr, Option<SocketAddr>) {
+struct CliArgs {
+    bind_addr: SocketAddr,
+    peer_addr: Option<SocketAddr>,
+    autotune: net::AutotuneConfig,
+}
+
+fn parse_args() -> CliArgs {
     let mut bind_addr = default_bind_addr();
     let mut peer_addr = None;
+    let mut autotune = net::AutotuneConfig::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -47,10 +55,33 @@ fn parse_args() -> (SocketAddr, Option<SocketAddr>) {
                     }
                 }
             }
+            "--autotune-inflight" => {
+                if let Some(value) = args.next() {
+                    autotune.enabled = value != "off" && value != "0";
+                }
+            }
+            "--autotune-gain" => {
+                if let Some(value) = args.next() {
+                    if let Ok(parsed) = value.parse() {
+                        autotune.gain = parsed;
+                    }
+                }
+            }
+            "--autotune-max-window" => {
+                if let Some(value) = args.next() {
+                    if let Ok(parsed) = value.parse() {
+                        autotune.max_window = parsed;
+                    }
+                }
+            }
             _ => {}
         }
     }
-    (bind_addr, peer_addr)
+    CliArgs {
+        bind_addr,
+        peer_addr,
+        autotune,
+    }
 }
 
 fn default_bind_addr() -> SocketAddr {

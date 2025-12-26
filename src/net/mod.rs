@@ -5,13 +5,14 @@ use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use base64::Engine;
 use bincode::Options;
 use quinn::{Endpoint, EndpointConfig, RecvStream, ServerConfig};
 use tokio::runtime::Runtime;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc as tokio_mpsc;
 
 mod stun;
@@ -22,6 +23,130 @@ use transfer::{
 };
 
 const CHUNK_SIZE: usize = 64 * 1024;
+
+#[derive(Clone, Debug)]
+pub struct AutotuneConfig {
+    pub enabled: bool,
+    pub gain: f64,
+    pub min_window: u64,
+    pub max_window: u64,
+    pub sample_interval: Duration,
+    pub rate_decay: f64,
+}
+
+impl Default for AutotuneConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            gain: 1.5,
+            min_window: 256 * 1024,
+            max_window: 256 * 1024 * 1024,
+            sample_interval: Duration::from_millis(500),
+            rate_decay: 0.9,
+        }
+    }
+}
+
+impl AutotuneConfig {
+    fn clamp_target(&self, value: u64) -> u64 {
+        value.clamp(self.min_window, self.max_window)
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct PathMetricsSnapshot {
+    min_rtt: Duration,
+    srtt: Duration,
+    delivery_rate_max: f64,
+    bdp_estimate: u64,
+    target_inflight: u64,
+}
+
+#[derive(Debug, Default)]
+struct PathMetrics {
+    min_rtt: Option<Duration>,
+    srtt: Duration,
+    delivery_rate_max: f64,
+    bdp_estimate: u64,
+    last_bytes_sent: u64,
+    last_sample: Option<Instant>,
+    target_inflight: u64,
+}
+
+impl PathMetrics {
+    fn update(&mut self, stats: &quinn::ConnectionStats, now: Instant, config: &AutotuneConfig) {
+        let srtt = stats.path.rtt;
+        self.srtt = srtt;
+        self.min_rtt = Some(self.min_rtt.map(|min| min.min(srtt)).unwrap_or(srtt));
+
+        if let Some(last_sample) = self.last_sample {
+            let elapsed = now.saturating_duration_since(last_sample);
+            if elapsed >= config.sample_interval / 2 {
+                let delta = stats
+                    .udp_tx
+                    .bytes
+                    .saturating_sub(self.last_bytes_sent)
+                    .saturating_sub(0);
+                let rate_sample = delta as f64 / elapsed.as_secs_f64().max(0.001);
+                self.delivery_rate_max = if self.delivery_rate_max == 0.0 {
+                    rate_sample
+                } else {
+                    let decayed = self.delivery_rate_max * config.rate_decay;
+                    decayed.max(rate_sample)
+                };
+            }
+        }
+
+        self.last_sample = Some(now);
+        self.last_bytes_sent = stats.udp_tx.bytes;
+
+        let min_rtt = self.min_rtt.unwrap_or(srtt);
+        let bdp = (self.delivery_rate_max * min_rtt.as_secs_f64()) as u64;
+        self.bdp_estimate = bdp;
+        let target = config.clamp_target(((bdp as f64) * config.gain) as u64);
+        self.target_inflight = target;
+    }
+
+    fn snapshot(&self, config: &AutotuneConfig) -> PathMetricsSnapshot {
+        PathMetricsSnapshot {
+            min_rtt: self.min_rtt.unwrap_or_default(),
+            srtt: self.srtt,
+            delivery_rate_max: self.delivery_rate_max,
+            bdp_estimate: self.bdp_estimate,
+            target_inflight: self.target_inflight.max(config.min_window),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct AutotuneState {
+    config: AutotuneConfig,
+    metrics: PathMetrics,
+}
+
+impl AutotuneState {
+    fn new(config: AutotuneConfig) -> Self {
+        Self {
+            metrics: PathMetrics {
+                target_inflight: config.min_window,
+                ..Default::default()
+            },
+            config,
+        }
+    }
+
+    fn current_target(&self) -> u64 {
+        self.metrics
+            .target_inflight
+            .max(self.config.min_window)
+            .min(self.config.max_window)
+    }
+
+    fn update(&mut self, stats: &quinn::ConnectionStats, now: Instant) -> PathMetricsSnapshot {
+        self.metrics.update(stats, now, &self.config);
+        self.metrics.snapshot(&self.config)
+    }
+}
 
 enum InboundFrame {
     Control(WireMessage, SocketAddr),
@@ -164,6 +289,7 @@ pub enum NetEvent {
 pub fn start_network(
     bind_addr: SocketAddr,
     peer_addr: Option<SocketAddr>,
+    autotune: AutotuneConfig,
 ) -> (
     tokio_mpsc::UnboundedSender<NetCommand>,
     Receiver<NetEvent>,
@@ -171,19 +297,21 @@ pub fn start_network(
 ) {
     let (cmd_tx, cmd_rx) = tokio_mpsc::unbounded_channel();
     let (evt_tx, evt_rx) = mpsc::channel();
-    let handle = thread::spawn(move || run_network(bind_addr, peer_addr, cmd_rx, evt_tx));
+    let handle = thread::spawn(move || run_network(bind_addr, peer_addr, autotune, cmd_rx, evt_tx));
     (cmd_tx, evt_rx, handle)
 }
 
 fn run_network(
     bind_addr: SocketAddr,
     initial_peer: Option<SocketAddr>,
+    autotune: AutotuneConfig,
     cmd_rx: tokio_mpsc::UnboundedReceiver<NetCommand>,
     evt_tx: Sender<NetEvent>,
 ) {
     let runtime = Runtime::new().expect("runtime");
     runtime.block_on(async move {
-        if let Err(err) = run_network_async(bind_addr, initial_peer, cmd_rx, evt_tx).await {
+        if let Err(err) = run_network_async(bind_addr, initial_peer, autotune, cmd_rx, evt_tx).await
+        {
             eprintln!("net thread error: {err}");
         }
     });
@@ -192,6 +320,7 @@ fn run_network(
 async fn run_network_async(
     mut bind_addr: SocketAddr,
     initial_peer: Option<SocketAddr>,
+    autotune: AutotuneConfig,
     mut cmd_rx: tokio_mpsc::UnboundedReceiver<NetCommand>,
     evt_tx: Sender<NetEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -199,8 +328,11 @@ async fn run_network_async(
 
     let mut pending_cmds: Vec<NetCommand> = Vec::new();
 
+    let autotune_state = std::sync::Arc::new(Mutex::new(AutotuneState::new(autotune.clone())));
+
     let (mut endpoint, _cert, initial_stun) = loop {
-        match make_endpoint(bind_addr, Some(&evt_tx)) {
+        let target_window = autotune_state.lock().await.current_target();
+        match make_endpoint(bind_addr, target_window, &autotune, Some(&evt_tx)) {
             Ok(ctx) => break ctx,
             Err(err) => {
                 let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir endpoint {err}")));
@@ -234,12 +366,22 @@ async fn run_network_async(
     let (mut inbound_tx, mut inbound_rx) = tokio_mpsc::unbounded_channel::<InboundFrame>();
     let (completion_tx, mut completion_rx) = tokio_mpsc::unbounded_channel::<u64>();
     let mut reader_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut metrics_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut connection: Option<quinn::Connection> = None;
 
     if let Some(peer) = initial_peer {
         let _ = evt_tx.send(NetEvent::PeerConnecting(peer));
         if let Some(conn) = connect_peer(&mut endpoint, peer, &evt_tx).await {
             setup_connection_reader(conn.clone(), &mut inbound_tx, &evt_tx, &mut reader_task);
+            if let Some(task) = metrics_task.take() {
+                task.abort();
+            }
+            metrics_task = Some(start_autotune_task(
+                conn.clone(),
+                autotune.clone(),
+                autotune_state.clone(),
+                evt_tx.clone(),
+            ));
             connected_peer = Some(conn.remote_address());
             connection = Some(conn);
             let _ = evt_tx.send(NetEvent::PeerConnected(peer));
@@ -262,6 +404,9 @@ async fn run_network_async(
                     &mut endpoint,
                     &mut inbound_tx,
                     &mut reader_task,
+                    &mut metrics_task,
+                    &autotune,
+                    &autotune_state,
                 )
                 .await?;
                 if exit {
@@ -276,7 +421,8 @@ async fn run_network_async(
                     Some(NetCommand::Rebind(new_bind)) => {
                         if new_bind != bind_addr {
                             let _ = evt_tx.send(NetEvent::Log(format!("reconfigurando bind para {new_bind}")));
-                            match make_endpoint(new_bind, Some(&evt_tx)) {
+                            let target_window = autotune_state.lock().await.current_target();
+                            match make_endpoint(new_bind, target_window, &autotune, Some(&evt_tx)) {
                                 Ok((new_endpoint, _, stun_res)) => {
                                     endpoint = new_endpoint;
                                     bind_addr = endpoint.local_addr().unwrap_or(new_bind);
@@ -286,6 +432,12 @@ async fn run_network_async(
                                     session_dir = None;
                                     incoming.clear();
                                     next_file_id = 1;
+                                    if let Some(task) = reader_task.take() {
+                                        task.abort();
+                                    }
+                                    if let Some(task) = metrics_task.take() {
+                                        task.abort();
+                                    }
                                     publish_stun_result(stun_res, &evt_tx);
                                 }
                                 Err(err) => {
@@ -307,6 +459,9 @@ async fn run_network_async(
                             &mut endpoint,
                             &mut inbound_tx,
                             &mut reader_task,
+                            &mut metrics_task,
+                            &autotune,
+                            &autotune_state,
                         ).await?;
                         if exit {
                             return Ok(());
@@ -326,6 +481,15 @@ async fn run_network_async(
                                 &evt_tx,
                                 &mut reader_task,
                             );
+                            if let Some(task) = metrics_task.take() {
+                                task.abort();
+                            }
+                            metrics_task = Some(start_autotune_task(
+                                new_conn.clone(),
+                                autotune.clone(),
+                                autotune_state.clone(),
+                                evt_tx.clone(),
+                            ));
                             connection = Some(new_conn.clone());
                             let _ = evt_tx.send(NetEvent::PeerConnected(new_conn.remote_address()));
                         }
@@ -389,6 +553,7 @@ async fn run_network_async(
     }
 
     let _ = reader_task.take().map(|t| t.abort());
+    let _ = metrics_task.take().map(|t| t.abort());
     Ok(())
 }
 
@@ -404,6 +569,9 @@ async fn handle_command(
     endpoint: &mut Endpoint,
     inbound_tx: &mut tokio_mpsc::UnboundedSender<InboundFrame>,
     reader_task: &mut Option<tokio::task::JoinHandle<()>>,
+    metrics_task: &mut Option<tokio::task::JoinHandle<()>>,
+    autotune: &AutotuneConfig,
+    autotune_state: &std::sync::Arc<Mutex<AutotuneState>>,
 ) -> io::Result<bool> {
     match cmd {
         NetCommand::ConnectPeer(addr) => {
@@ -417,7 +585,8 @@ async fn handle_command(
                 } else {
                     SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)
                 };
-                match make_endpoint(new_bind, Some(evt_tx)) {
+                let target_window = autotune_state.lock().await.current_target();
+                match make_endpoint(new_bind, target_window, autotune, Some(evt_tx)) {
                     Ok((new_endpoint, _, stun_res)) => {
                         *endpoint = new_endpoint;
                         *bind_addr = endpoint.local_addr().unwrap_or(new_bind);
@@ -425,6 +594,9 @@ async fn handle_command(
                         *connection = None;
                         *connected_peer = None;
                         let _ = reader_task.take().map(|t| t.abort());
+                        if let Some(task) = metrics_task.take() {
+                            task.abort();
+                        }
                         publish_stun_result(stun_res, evt_tx);
                     }
                     Err(err) => {
@@ -436,6 +608,15 @@ async fn handle_command(
             let _ = evt_tx.send(NetEvent::PeerConnecting(addr));
             if let Some(conn) = connect_peer(endpoint, addr, evt_tx).await {
                 setup_connection_reader(conn.clone(), inbound_tx, evt_tx, reader_task);
+                if let Some(task) = metrics_task.take() {
+                    task.abort();
+                }
+                metrics_task.replace(start_autotune_task(
+                    conn.clone(),
+                    autotune.clone(),
+                    autotune_state.clone(),
+                    evt_tx.clone(),
+                ));
                 *connection = Some(conn);
                 let _ = evt_tx.send(NetEvent::PeerConnected(addr));
             }
@@ -501,14 +682,20 @@ fn log_transport_config(evt_tx: &Sender<NetEvent>) {
 
 fn make_endpoint(
     bind_addr: SocketAddr,
+    target_window: u64,
+    autotune: &AutotuneConfig,
     evt_tx: Option<&Sender<NetEvent>>,
 ) -> Result<(Endpoint, Vec<u8>, Result<Option<SocketAddr>, String>), Box<dyn std::error::Error>> {
     let cert = rcgen::generate_simple_self_signed(["pasta-p2p.local".into()])?;
     let cert_der = cert.serialize_der()?;
     let priv_key = cert.serialize_private_key_der();
 
-    let server_config = make_server_config(cert_der.clone(), priv_key.clone())?;
-    let client_config = make_client_config();
+    let server_config = make_server_config(
+        cert_der.clone(),
+        priv_key.clone(),
+        make_transport_config(target_window, autotune),
+    )?;
+    let client_config = make_client_config(make_transport_config(target_window, autotune));
 
     let socket = match std::net::UdpSocket::bind(bind_addr) {
         Ok(socket) => socket,
@@ -552,9 +739,21 @@ fn make_endpoint(
     Ok((endpoint, cert_der, stun_result))
 }
 
+fn make_transport_config(target_window: u64, autotune: &AutotuneConfig) -> quinn::TransportConfig {
+    let mut transport = quinn::TransportConfig::default();
+    transport.keep_alive_interval(Some(Duration::from_secs(5)));
+    if let Ok(timeout) = quinn::IdleTimeout::try_from(Duration::from_secs(60)) {
+        transport.max_idle_timeout(Some(timeout));
+    }
+
+    configure_flow_control(&mut transport, target_window, autotune);
+    transport
+}
+
 fn make_server_config(
     cert_der: Vec<u8>,
     key_der: Vec<u8>,
+    transport: quinn::TransportConfig,
 ) -> Result<ServerConfig, Box<dyn std::error::Error>> {
     use quinn::rustls;
     use std::sync::Arc;
@@ -572,16 +771,11 @@ fn make_server_config(
 
     let crypto = quinn::crypto::rustls::QuicServerConfig::try_from(crypto)?;
     let mut server_config = ServerConfig::with_crypto(Arc::new(crypto));
-    let mut transport = quinn::TransportConfig::default();
-    transport.keep_alive_interval(Some(Duration::from_secs(5)));
-    if let Ok(timeout) = quinn::IdleTimeout::try_from(Duration::from_secs(60)) {
-        transport.max_idle_timeout(Some(timeout));
-    }
     server_config.transport = std::sync::Arc::new(transport);
     Ok(server_config)
 }
 
-fn make_client_config() -> quinn::ClientConfig {
+fn make_client_config(mut transport: quinn::TransportConfig) -> quinn::ClientConfig {
     use quinn::rustls::{self, DigitallySignedStruct, SignatureScheme, client::danger};
 
     #[derive(Debug)]
@@ -637,7 +831,110 @@ fn make_client_config() -> quinn::ClientConfig {
     let crypto =
         quinn::crypto::rustls::QuicClientConfig::try_from(crypto).expect("quic client config");
 
-    quinn::ClientConfig::new(std::sync::Arc::new(crypto))
+    let mut client = quinn::ClientConfig::new(std::sync::Arc::new(crypto));
+    transport.max_concurrent_uni_streams(quinn::VarInt::from_u32(32));
+    client.transport_config(std::sync::Arc::new(transport));
+    client
+}
+
+fn configure_flow_control(
+    transport: &mut quinn::TransportConfig,
+    target_window: u64,
+    autotune: &AutotuneConfig,
+) {
+    let clamped = autotune.clamp_target(target_window);
+    let flow_window = clamped.min(quinn::VarInt::MAX.into_inner());
+    let flow_window = quinn::VarInt::from_u64(flow_window)
+        .expect("flow control window within QUIC varint bounds");
+    transport.stream_receive_window(flow_window);
+    transport.receive_window(flow_window);
+    transport.send_window(clamped);
+}
+
+fn apply_autotune_target(
+    connection: &quinn::Connection,
+    target_window: u64,
+    autotune: &AutotuneConfig,
+) {
+    let clamped = autotune.clamp_target(target_window);
+    let flow_window = quinn::VarInt::from_u64(clamped.min(quinn::VarInt::MAX.into_inner()))
+        .expect("flow control window within QUIC varint bounds");
+    connection.set_receive_window(flow_window);
+    connection.set_send_window(clamped);
+}
+
+fn start_autotune_task(
+    connection: quinn::Connection,
+    autotune: AutotuneConfig,
+    autotune_state: std::sync::Arc<Mutex<AutotuneState>>,
+    evt_tx: Sender<NetEvent>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        if !autotune.enabled {
+            return;
+        }
+
+        let mut ticker = tokio::time::interval(autotune.sample_interval);
+        let closed = connection.closed();
+        tokio::pin!(closed);
+        let mut last_applied = 0u64;
+        let mut last_log = Instant::now();
+        loop {
+            tokio::select! {
+                _ = &mut closed => break,
+                _ = ticker.tick() => {
+                    let stats = connection.stats();
+                    let snapshot = {
+                        let mut state = autotune_state.lock().await;
+                        state.update(&stats, Instant::now())
+                    };
+
+                    if last_applied == 0 || should_refresh_window(last_applied, snapshot.target_inflight) {
+                        apply_autotune_target(&connection, snapshot.target_inflight, &autotune);
+                        last_applied = snapshot.target_inflight;
+                    }
+
+                    if last_log.elapsed() >= Duration::from_secs(1) {
+                        let rate_mbps = snapshot.delivery_rate_max / 1_000_000.0;
+                        let _ = evt_tx.send(NetEvent::Log(format!(
+                            "autotune inflight: min_rtt={:.2?} srtt={:.2?} rate={:.2} Mbps bdp={} target={}",
+                            snapshot.min_rtt,
+                            snapshot.srtt,
+                            rate_mbps,
+                            format_bytes(snapshot.bdp_estimate),
+                            format_bytes(snapshot.target_inflight)
+                        )));
+                        last_log = Instant::now();
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn should_refresh_window(previous: u64, new_value: u64) -> bool {
+    if previous == 0 {
+        return true;
+    }
+    let lower = previous.saturating_sub(previous / 10);
+    let upper = previous + previous / 10;
+    new_value < lower || new_value > upper
+}
+
+fn format_bytes(value: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let value_f = value as f64;
+    if value_f >= GB {
+        format!("{:.2} GiB", value_f / GB)
+    } else if value_f >= MB {
+        format!("{:.2} MiB", value_f / MB)
+    } else if value_f >= KB {
+        format!("{:.1} KiB", value_f / KB)
+    } else {
+        format!("{value} B")
+    }
 }
 
 #[cfg(test)]
@@ -649,7 +946,7 @@ mod endpoint_tests {
         let runtime = tokio::runtime::Runtime::new().expect("runtime");
         runtime.block_on(async {
             let bind_addr: SocketAddr = "127.0.0.1:0".parse().expect("addr");
-            let result = make_endpoint(bind_addr, None);
+            let result = make_endpoint(bind_addr, 512 * 1024, &AutotuneConfig::default(), None);
             assert!(
                 result.is_ok(),
                 "expected endpoint creation to succeed, got {result:?}"
@@ -663,13 +960,22 @@ mod endpoint_tests {
         runtime.block_on(async {
             let (evt_tx, _evt_rx) = std::sync::mpsc::channel::<NetEvent>();
 
-            let (server, _, _) = make_endpoint("127.0.0.1:0".parse().expect("server bind"), None)
-                .expect("server endpoint");
+            let (server, _, _) = make_endpoint(
+                "127.0.0.1:0".parse().expect("server bind"),
+                512 * 1024,
+                &AutotuneConfig::default(),
+                None,
+            )
+            .expect("server endpoint");
             let server_addr = server.local_addr().expect("server addr");
 
-            let (mut client, _, _) =
-                make_endpoint("127.0.0.1:0".parse().expect("client bind"), None)
-                    .expect("client endpoint");
+            let (mut client, _, _) = make_endpoint(
+                "127.0.0.1:0".parse().expect("client bind"),
+                512 * 1024,
+                &AutotuneConfig::default(),
+                None,
+            )
+            .expect("client endpoint");
 
             let accept_fut = async {
                 let incoming = server.accept().await.expect("incoming");
