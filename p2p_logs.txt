@@ -49,3 +49,11 @@ conectado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:61979
 diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-46-51
 recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-46-51\pong.rar
 recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-25_23-46-51\pong.rar
+transporte QUIC: streams confiaveis com TLS 1.3
+dados de arquivo: streams unidirecionais com chunks de 16384 bytes
+endpoint publico [2804:d45:9a05:f400:b94b:17b1:85bd:9bc1]:53268
+copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:53268
+conectado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:56829
+diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_00-02-43
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_00-02-43\pong.rar
+recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_00-02-43\pong.rar

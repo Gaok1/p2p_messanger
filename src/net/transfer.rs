@@ -196,6 +196,20 @@ pub(crate) async fn send_message(
     }
 }
 
+async fn write_wire_message_framed(
+    stream: &mut quinn::SendStream,
+    message: &WireMessage,
+    evt_tx: &Sender<NetEvent>,
+) -> io::Result<()> {
+    match serialize_message(message) {
+        Ok(payload) => write_framed(stream, &payload).await,
+        Err(err) => {
+            let _ = evt_tx.send(NetEvent::Log(format!("erro ao serializar {err}")));
+            Ok(())
+        }
+    }
+}
+
 async fn write_framed(stream: &mut quinn::SendStream, payload: &[u8]) -> io::Result<()> {
     let len = payload.len() as u32;
     stream.write_all(&len.to_be_bytes()).await?;
@@ -253,13 +267,17 @@ pub(crate) async fn send_files(
         let file_id = *next_file_id;
         *next_file_id += 1;
 
-        let _ = send_message(
-            connection,
-            &WireMessage::FileMeta {
-                file_id,
-                name,
-                size,
-            },
+        let mut stream = match connection.open_uni().await {
+            Ok(stream) => stream,
+            Err(err) => {
+                let _ = evt_tx.send(NetEvent::Log(format!("erro ao abrir stream {err}")));
+                continue;
+            }
+        };
+
+        let _ = write_wire_message_framed(
+            &mut stream,
+            &WireMessage::FileMeta { file_id, name, size },
             evt_tx,
         )
         .await;
@@ -277,8 +295,8 @@ pub(crate) async fn send_files(
                 break;
             }
 
-            let _ = send_message(
-                connection,
+            let _ = write_wire_message_framed(
+                &mut stream,
                 &WireMessage::FileChunk {
                     file_id,
                     data: buffer[..read].to_vec(),
@@ -295,12 +313,13 @@ pub(crate) async fn send_files(
 
             match handle_send_control(cmd_rx, pending_cmds) {
                 SendOutcome::Canceled => {
-                    let _ = send_message(
-                        connection,
+                    let _ = write_wire_message_framed(
+                        &mut stream,
                         &WireMessage::Cancel { file_id },
                         evt_tx,
                     )
                     .await;
+                    let _ = stream.finish();
                     let _ = evt_tx.send(NetEvent::SendCanceled {
                         file_id,
                         path: path.clone(),
@@ -308,19 +327,21 @@ pub(crate) async fn send_files(
                     return Ok(SendOutcome::Canceled);
                 }
                 SendOutcome::Shutdown => {
-                    let _ = send_message(
-                        connection,
+                    let _ = write_wire_message_framed(
+                        &mut stream,
                         &WireMessage::Cancel { file_id },
                         evt_tx,
                     )
                     .await;
+                    let _ = stream.finish();
                     return Ok(SendOutcome::Shutdown);
                 }
                 SendOutcome::Completed => {}
             }
         }
 
-        let _ = send_message(connection, &WireMessage::FileDone { file_id }, evt_tx).await;
+        let _ = write_wire_message_framed(&mut stream, &WireMessage::FileDone { file_id }, evt_tx).await;
+        let _ = stream.finish();
         let _ = evt_tx.send(NetEvent::FileSent {
             file_id,
             path: path.clone(),

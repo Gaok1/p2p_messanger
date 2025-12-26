@@ -19,7 +19,7 @@ mod transfer;
 
 use transfer::{IncomingFile, SendOutcome, handle_incoming_message, send_files};
 
-const CHUNK_SIZE: usize = 1024;
+const CHUNK_SIZE: usize = 16 * 1024;
 
 /// Mensagens enviadas pela camada de rede para trafegar os arquivos.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -655,23 +655,26 @@ fn setup_connection_reader(
         loop {
             match connection.accept_uni().await {
                 Ok(mut stream) => {
-                    match read_framed(&mut stream).await {
-                        Ok(payload) => match decode_payload(&payload) {
-                            Ok(message) => {
-                                let _ = inbound.send((message, connection.remote_address()));
-                            }
+                    loop {
+                        match read_frame(&mut stream).await {
+                            Ok(Some(payload)) => match decode_payload(&payload) {
+                                Ok(message) => {
+                                    let _ = inbound.send((message, connection.remote_address()));
+                                }
+                                Err(err) => {
+                                    let base64_preview = base64::engine::general_purpose::STANDARD
+                                        .encode(&payload);
+                                    let preview = base64_preview.chars().take(48).collect::<String>();
+                                    let _ = evt_tx.send(NetEvent::Log(format!(
+                                        "erro ao decodificar {err}; payload(base64)={preview}"
+                                    )));
+                                }
+                            },
+                            Ok(None) => break,
                             Err(err) => {
-                                let base64_preview = base64::engine::general_purpose::STANDARD
-                                    .encode(&payload);
-                                let preview = base64_preview.chars().take(48).collect::<String>();
-                                let _ = evt_tx.send(NetEvent::Log(format!(
-                                    "erro ao decodificar {err}; payload(base64)={preview}"
-                                )));
+                                let _ = evt_tx.send(NetEvent::Log(format!("stream encerrado {err}")));
+                                break;
                             }
-                        },
-                        Err(err) => {
-                            let _ = evt_tx.send(NetEvent::Log(format!("stream encerrado {err}")));
-                            break;
                         }
                     }
                 }
@@ -685,19 +688,35 @@ fn setup_connection_reader(
     *reader_task = Some(handle);
 }
 
-async fn read_framed(stream: &mut quinn::RecvStream) -> io::Result<Vec<u8>> {
+async fn read_frame(stream: &mut quinn::RecvStream) -> io::Result<Option<Vec<u8>>> {
     let mut len_buf = [0u8; 4];
-    stream
-        .read_exact(&mut len_buf)
-        .await
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    let mut read_len = 0usize;
+    while read_len < len_buf.len() {
+        let n = tokio::io::AsyncReadExt::read(stream, &mut len_buf[read_len..]).await?;
+        if n == 0 {
+            if read_len == 0 {
+                return Ok(None);
+            }
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "frame header incompleto"));
+        }
+        read_len += n;
+    }
+
     let len = u32::from_be_bytes(len_buf) as usize;
     let mut payload = vec![0u8; len];
-    stream
-        .read_exact(&mut payload)
-        .await
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
-    Ok(payload)
+    let mut read_payload = 0usize;
+    while read_payload < len {
+        let n = tokio::io::AsyncReadExt::read(stream, &mut payload[read_payload..]).await?;
+        if n == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "frame payload incompleto",
+            ));
+        }
+        read_payload += n;
+    }
+
+    Ok(Some(payload))
 }
 
 #[cfg(test)]
