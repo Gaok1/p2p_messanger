@@ -20,9 +20,65 @@ mod transfer;
 
 use transfer::{
     IncomingTransfer, SendOutcome, handle_incoming_message, handle_incoming_stream, send_files,
+    send_message,
 };
 
 const CHUNK_SIZE: usize = 64 * 1024;
+pub(crate) const PROTOCOL_VERSION: u8 = 3;
+pub(crate) const OBSERVED_ENDPOINT_VERSION: u8 = 2;
+pub(crate) const HEARTBEAT_VERSION: u8 = 3;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
+const MOBILITY_TIMER_PARK: Duration = Duration::from_secs(3600);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
+const HEARTBEAT_MAX_MISSES: u32 = 3;
+
+#[derive(Clone, Copy, Debug)]
+struct ConnectAttempt {
+    id: u64,
+    peer: SocketAddr,
+}
+
+struct ConnectResult {
+    id: u64,
+    peer: SocketAddr,
+    connection: Option<quinn::Connection>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MobilityConfig {
+    enabled: bool,
+    observe_interval: Duration,
+    reconnect_enabled: bool,
+    reconnect_initial: Duration,
+    reconnect_max: Duration,
+    rebind_after_failures: u32,
+}
+
+const MOBILITY_DEFAULT: MobilityConfig = MobilityConfig {
+    enabled: true,
+    observe_interval: Duration::from_secs(10),
+    reconnect_enabled: true,
+    reconnect_initial: Duration::from_millis(500),
+    reconnect_max: Duration::from_secs(10),
+    rebind_after_failures: 0,
+};
+
+impl Default for MobilityConfig {
+    fn default() -> Self {
+        MOBILITY_DEFAULT
+    }
+}
+
+#[derive(Debug)]
+struct ReconnectState {
+    peer: SocketAddr,
+    backoff: Duration,
+    failures: u32,
+}
+
+enum ConnSignal {
+    Closed { peer: SocketAddr, error: String },
+}
 
 #[derive(Clone, Debug)]
 pub struct AutotuneConfig {
@@ -183,6 +239,15 @@ pub(crate) enum WireMessage {
     FileDone {
         file_id: u64,
     },
+    ObservedEndpoint {
+        addr: SocketAddr,
+    },
+    Ping {
+        nonce: u64,
+    },
+    Pong {
+        nonce: u64,
+    },
 }
 
 fn bincode_options() -> impl Options {
@@ -254,6 +319,7 @@ pub enum NetEvent {
     SessionDir(PathBuf),
     PeerConnecting(SocketAddr),
     PeerConnected(SocketAddr),
+    PeerDisconnected(SocketAddr),
     PeerTimeout(SocketAddr),
     SendStarted {
         file_id: u64,
@@ -357,6 +423,7 @@ async fn run_network_async(
         bind_addr = local_addr;
         let _ = evt_tx.send(NetEvent::Bound(local_addr));
     }
+    let mut public_endpoint = initial_stun.as_ref().ok().copied().flatten();
     publish_stun_result(initial_stun, &evt_tx);
 
     let mut connected_peer: Option<SocketAddr> = None;
@@ -368,24 +435,30 @@ async fn run_network_async(
     let mut reader_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut metrics_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut connection: Option<quinn::Connection> = None;
+    let mut peer_protocol_version: Option<u8> = None;
+    let mut heartbeat_tick = tokio::time::interval(HEARTBEAT_INTERVAL);
+    heartbeat_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut heartbeat_inflight: Option<u64> = None;
+    let mut heartbeat_misses: u32 = 0;
+    let mut heartbeat_nonce: u64 = 0;
+
+    let mobility = MobilityConfig::default();
+    let (conn_signal_tx, mut conn_signal_rx) = tokio_mpsc::unbounded_channel::<ConnSignal>();
+    let mut liveness_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut observe_task: Option<tokio::task::JoinHandle<()>> = None;
+
+    let (connect_tx, mut connect_rx) = tokio_mpsc::unbounded_channel::<ConnectResult>();
+    let mut connect_attempt: Option<ConnectAttempt> = None;
+    let mut next_connect_id: u64 = 0;
+
+    let mut last_peer: Option<SocketAddr> = initial_peer;
+    let mut reconnect: Option<ReconnectState> = None;
+    let mut reconnect_deadline: Option<tokio::time::Instant> = None;
+    let reconnect_sleep = tokio::time::sleep(MOBILITY_TIMER_PARK);
+    tokio::pin!(reconnect_sleep);
 
     if let Some(peer) = initial_peer {
-        let _ = evt_tx.send(NetEvent::PeerConnecting(peer));
-        if let Some(conn) = connect_peer(&mut endpoint, peer, &evt_tx).await {
-            setup_connection_reader(conn.clone(), &mut inbound_tx, &evt_tx, &mut reader_task);
-            if let Some(task) = metrics_task.take() {
-                task.abort();
-            }
-            metrics_task = Some(start_autotune_task(
-                conn.clone(),
-                autotune.clone(),
-                autotune_state.clone(),
-                evt_tx.clone(),
-            ));
-            connected_peer = Some(conn.remote_address());
-            connection = Some(conn);
-            let _ = evt_tx.send(NetEvent::PeerConnected(peer));
-        }
+        pending_cmds.push(NetCommand::ConnectPeer(peer));
     }
 
     loop {
@@ -405,6 +478,13 @@ async fn run_network_async(
                     &mut inbound_tx,
                     &mut reader_task,
                     &mut metrics_task,
+                    &connect_tx,
+                    &mut connect_attempt,
+                    &mut next_connect_id,
+                    &mut last_peer,
+                    &mut liveness_task,
+                    &mut observe_task,
+                    &mut public_endpoint,
                     &autotune,
                     &autotune_state,
                 )
@@ -429,6 +509,7 @@ async fn run_network_async(
                                     let _ = evt_tx.send(NetEvent::Bound(bind_addr));
                                     connection = None;
                                     connected_peer = None;
+                                    connect_attempt = None;
                                     session_dir = None;
                                     incoming.clear();
                                     next_file_id = 1;
@@ -438,6 +519,21 @@ async fn run_network_async(
                                     if let Some(task) = metrics_task.take() {
                                         task.abort();
                                     }
+                                    if let Some(task) = liveness_task.take() {
+                                        task.abort();
+                                    }
+                                    if let Some(task) = observe_task.take() {
+                                        task.abort();
+                                    }
+                                    peer_protocol_version = None;
+                                    heartbeat_inflight = None;
+                                    heartbeat_misses = 0;
+                                    reconnect = None;
+                                    reconnect_deadline = None;
+                                    reconnect_sleep
+                                        .as_mut()
+                                        .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
+                                    public_endpoint = stun_res.as_ref().ok().copied().flatten();
                                     publish_stun_result(stun_res, &evt_tx);
                                 }
                                 Err(err) => {
@@ -447,6 +543,13 @@ async fn run_network_async(
                         }
                     }
                     Some(other) => {
+                        if mobility.enabled && matches!(other, NetCommand::ConnectPeer(_)) {
+                            reconnect = None;
+                            reconnect_deadline = None;
+                            reconnect_sleep
+                                .as_mut()
+                                .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
+                        }
                         let exit = handle_command(
                             other,
                             &mut bind_addr,
@@ -457,44 +560,351 @@ async fn run_network_async(
                             &mut cmd_rx,
                             &mut pending_cmds,
                             &mut endpoint,
-                            &mut inbound_tx,
-                            &mut reader_task,
-                            &mut metrics_task,
-                            &autotune,
-                            &autotune_state,
-                        ).await?;
-                        if exit {
-                            return Ok(());
-                        }
+                             &mut inbound_tx,
+                             &mut reader_task,
+                             &mut metrics_task,
+                             &connect_tx,
+                             &mut connect_attempt,
+                             &mut next_connect_id,
+                             &mut last_peer,
+                             &mut liveness_task,
+                             &mut observe_task,
+                             &mut public_endpoint,
+                             &autotune,
+                             &autotune_state,
+                          ).await?;
+                          if exit {
+                              return Ok(());
+                         }
                     }
                     None => return Ok(()),
                 }
             }
-            incoming = endpoint.accept() => {
-                if let Some(connecting) = incoming {
-                    match connecting.await {
-                        Ok(new_conn) => {
-                            connected_peer = Some(new_conn.remote_address());
-                            setup_connection_reader(
-                                new_conn.clone(),
-                                &mut inbound_tx,
-                                &evt_tx,
-                                &mut reader_task,
-                            );
+            Some(signal) = conn_signal_rx.recv() => {
+                match signal {
+                    ConnSignal::Closed { peer, error } => {
+                        let matches_peer = connection
+                            .as_ref()
+                            .is_some_and(|conn| conn.remote_address() == peer);
+                        if !matches_peer {
+                            continue;
+                        }
+
+                        connection = None;
+                        connected_peer = None;
+                        connect_attempt = None;
+                        if let Some(task) = reader_task.take() {
+                            task.abort();
+                        }
+                        if let Some(task) = metrics_task.take() {
+                            task.abort();
+                        }
+                        if let Some(task) = liveness_task.take() {
+                            task.abort();
+                        }
+                        if let Some(task) = observe_task.take() {
+                            task.abort();
+                        }
+                        peer_protocol_version = None;
+                        heartbeat_inflight = None;
+                        heartbeat_misses = 0;
+
+                        let _ = evt_tx.send(NetEvent::Log(format!(
+                            "conexao perdida {peer}: {error}"
+                        )));
+                        let _ = evt_tx.send(NetEvent::PeerDisconnected(peer));
+
+                        if mobility.enabled && mobility.reconnect_enabled {
+                            reconnect = Some(ReconnectState {
+                                peer,
+                                backoff: mobility.reconnect_initial,
+                                failures: 0,
+                            });
+                            let next = tokio::time::Instant::now() + mobility.reconnect_initial;
+                            reconnect_deadline = Some(next);
+                            reconnect_sleep.as_mut().reset(next);
+                        }
+                    }
+                }
+            }
+            _ = heartbeat_tick.tick(), if connection.is_some() && peer_protocol_version.unwrap_or(0) >= HEARTBEAT_VERSION => {
+                if heartbeat_inflight.is_some() {
+                    heartbeat_misses = heartbeat_misses.saturating_add(1);
+                    if heartbeat_misses >= HEARTBEAT_MAX_MISSES {
+                        if let Some(conn) = connection.take() {
+                            let peer = conn.remote_address();
+                            conn.close(quinn::VarInt::from_u32(0), b"heartbeat timeout");
+                            connected_peer = None;
+                            connect_attempt = None;
+                            if let Some(task) = reader_task.take() {
+                                task.abort();
+                            }
                             if let Some(task) = metrics_task.take() {
                                 task.abort();
                             }
-                            metrics_task = Some(start_autotune_task(
-                                new_conn.clone(),
-                                autotune.clone(),
-                                autotune_state.clone(),
-                                evt_tx.clone(),
-                            ));
-                            connection = Some(new_conn.clone());
-                            let _ = evt_tx.send(NetEvent::PeerConnected(new_conn.remote_address()));
+                            if let Some(task) = liveness_task.take() {
+                                task.abort();
+                            }
+                            if let Some(task) = observe_task.take() {
+                                task.abort();
+                            }
+                            peer_protocol_version = None;
+                            heartbeat_inflight = None;
+                            heartbeat_misses = 0;
+                            let _ = evt_tx.send(NetEvent::Log(format!(
+                                "heartbeat: sem resposta de {peer} ({}x), desconectando",
+                                HEARTBEAT_MAX_MISSES
+                            )));
+                            let _ = evt_tx.send(NetEvent::PeerDisconnected(peer));
+
+                            if mobility.enabled && mobility.reconnect_enabled {
+                                reconnect = Some(ReconnectState {
+                                    peer,
+                                    backoff: mobility.reconnect_initial,
+                                    failures: 0,
+                                });
+                                let next = tokio::time::Instant::now() + mobility.reconnect_initial;
+                                reconnect_deadline = Some(next);
+                                reconnect_sleep.as_mut().reset(next);
+                            }
                         }
-                        Err(err) => {
-                            let _ = evt_tx.send(NetEvent::Log(format!("erro ao aceitar {err}")));
+                        continue;
+                    }
+                }
+
+                heartbeat_nonce = heartbeat_nonce.wrapping_add(1);
+                let nonce = heartbeat_nonce;
+                heartbeat_inflight = Some(nonce);
+                if let Some(conn) = connection.as_ref() {
+                    let _ = send_message(conn, &WireMessage::Ping { nonce }, &evt_tx).await;
+                }
+            }
+            _ = &mut reconnect_sleep, if reconnect_deadline.is_some() => {
+                reconnect_deadline = None;
+                if !mobility.enabled || !mobility.reconnect_enabled {
+                    continue;
+                }
+                let Some(state) = reconnect.as_ref() else {
+                    continue;
+                };
+                if connection.is_some() || connect_attempt.is_some() {
+                    let next = tokio::time::Instant::now() + Duration::from_millis(250);
+                    reconnect_deadline = Some(next);
+                    reconnect_sleep.as_mut().reset(next);
+                    continue;
+                }
+                pending_cmds.push(NetCommand::ConnectPeer(state.peer));
+            }
+            Some(connect_result) = connect_rx.recv() => {
+                let Some(attempt) = connect_attempt else {
+                    continue;
+                };
+                if attempt.id != connect_result.id || attempt.peer != connect_result.peer {
+                     continue;
+                 }
+
+                connect_attempt = None;
+                match connect_result.connection {
+                    Some(new_conn) => {
+                        if let Some(task) = reader_task.take() {
+                            task.abort();
+                        }
+                        if let Some(task) = metrics_task.take() {
+                            task.abort();
+                        }
+                        if let Some(task) = liveness_task.take() {
+                            task.abort();
+                        }
+                        if let Some(task) = observe_task.take() {
+                            task.abort();
+                        }
+                        peer_protocol_version = None;
+                        heartbeat_inflight = None;
+                        heartbeat_misses = 0;
+                        setup_connection_reader(
+                            new_conn.clone(),
+                            &mut inbound_tx,
+                            &evt_tx,
+                            &mut reader_task,
+                        );
+                        metrics_task = Some(start_autotune_task(
+                            new_conn.clone(),
+                            autotune.clone(),
+                            autotune_state.clone(),
+                            evt_tx.clone(),
+                        ));
+                        if mobility.enabled {
+                            liveness_task = Some(start_liveness_task(new_conn.clone(), conn_signal_tx.clone()));
+                        }
+                        reconnect = None;
+                        reconnect_deadline = None;
+                        reconnect_sleep
+                            .as_mut()
+                            .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
+                        connected_peer = Some(new_conn.remote_address());
+                        last_peer = Some(new_conn.remote_address());
+                        connection = Some(new_conn.clone());
+                        let _ = send_message(
+                            &new_conn,
+                            &WireMessage::Hello {
+                                version: PROTOCOL_VERSION,
+                            },
+                            &evt_tx,
+                        )
+                        .await;
+                        let _ = evt_tx.send(NetEvent::PeerConnected(new_conn.remote_address()));
+                    }
+                    None => {
+                        if connection.is_none() && connected_peer == Some(connect_result.peer) {
+                            connected_peer = None;
+                        }
+                        let _ = evt_tx.send(NetEvent::PeerTimeout(connect_result.peer));
+
+                        if mobility.enabled && mobility.reconnect_enabled {
+                            let peer = connect_result.peer;
+                            let state = reconnect.get_or_insert(ReconnectState {
+                                peer,
+                                backoff: mobility.reconnect_initial,
+                                failures: 0,
+                            });
+                            if state.peer != peer {
+                                *state = ReconnectState {
+                                    peer,
+                                    backoff: mobility.reconnect_initial,
+                                    failures: 0,
+                                };
+                            }
+                            state.failures = state.failures.saturating_add(1);
+
+                            if mobility.rebind_after_failures > 0
+                                && state.failures >= mobility.rebind_after_failures
+                                && state.failures % mobility.rebind_after_failures == 0
+                            {
+                                let new_bind = SocketAddr::new(bind_addr.ip(), 0);
+                                let _ = evt_tx.send(NetEvent::Log(format!(
+                                    "mobilidade: rebind apos {} falhas (novo bind {new_bind})",
+                                    state.failures
+                                )));
+                                let target_window = autotune_state.lock().await.current_target();
+                                match make_endpoint(new_bind, target_window, &autotune, Some(&evt_tx))
+                                {
+                                    Ok((new_endpoint, _, stun_res)) => {
+                                        endpoint = new_endpoint;
+                                        bind_addr = endpoint.local_addr().unwrap_or(new_bind);
+                                        let _ = evt_tx.send(NetEvent::Bound(bind_addr));
+                                        public_endpoint =
+                                            stun_res.as_ref().ok().copied().flatten();
+                                        publish_stun_result(stun_res, &evt_tx);
+                                    }
+                                    Err(err) => {
+                                        let _ = evt_tx.send(NetEvent::Log(format!(
+                                            "mobilidade: falha ao rebind {err}"
+                                        )));
+                                    }
+                                }
+                            }
+
+                            let delay = state.backoff;
+                            state.backoff = state
+                                .backoff
+                                .saturating_mul(2)
+                                .min(mobility.reconnect_max);
+                            let next = tokio::time::Instant::now() + delay;
+                            reconnect_deadline = Some(next);
+                            reconnect_sleep.as_mut().reset(next);
+                            let _ = evt_tx.send(NetEvent::Log(format!(
+                                "reconectando {peer} em {}ms",
+                                delay.as_millis()
+                            )));
+                        }
+                    }
+                }
+            }
+            incoming = endpoint.accept() => {
+                if let Some(connecting) = incoming {
+                     match connecting.await {
+                          Ok(new_conn) => {
+                              if let Some(attempt) = connect_attempt {
+                                  let remote = new_conn.remote_address();
+                                  if attempt.peer != remote {
+                                      let _ = evt_tx.send(NetEvent::Log(format!(
+                                          "conexao recebida de {} (aguardando {}), ignorando",
+                                          remote,
+                                          attempt.peer
+                                      )));
+                                      continue;
+                                  }
+
+                                  if public_endpoint
+                                      .map(|local| local < attempt.peer)
+                                      .unwrap_or(false)
+                                  {
+                                      let _ = evt_tx.send(NetEvent::Log(format!(
+                                          "simultaneo: mantendo conexao de saida (local={public_endpoint:?} < peer={}), ignorando entrada {}",
+                                          attempt.peer,
+                                          remote
+                                      )));
+                                      continue;
+                                  }
+                                  connect_attempt = None;
+                              } else if connection.is_some() {
+                                  let _ = evt_tx.send(NetEvent::Log(format!(
+                                      "conexao extra ignorada de {} (ja conectado)",
+                                      new_conn.remote_address()
+                                 )));
+                                 continue;
+                             }
+
+                              if let Some(task) = reader_task.take() {
+                                  task.abort();
+                              }
+                              if let Some(task) = liveness_task.take() {
+                                  task.abort();
+                              }
+                              if let Some(task) = observe_task.take() {
+                                  task.abort();
+                              }
+                              peer_protocol_version = None;
+                              heartbeat_inflight = None;
+                              heartbeat_misses = 0;
+                              connected_peer = Some(new_conn.remote_address());
+                              last_peer = Some(new_conn.remote_address());
+                              setup_connection_reader(
+                                  new_conn.clone(),
+                                  &mut inbound_tx,
+                                  &evt_tx,
+                                  &mut reader_task,
+                              );
+                             if let Some(task) = metrics_task.take() {
+                                 task.abort();
+                             }
+                             metrics_task = Some(start_autotune_task(
+                                 new_conn.clone(),
+                                 autotune.clone(),
+                                  autotune_state.clone(),
+                                  evt_tx.clone(),
+                              ));
+                              if mobility.enabled {
+                                  liveness_task = Some(start_liveness_task(new_conn.clone(), conn_signal_tx.clone()));
+                              }
+                              reconnect = None;
+                              reconnect_deadline = None;
+                              reconnect_sleep.as_mut().reset(
+                                  tokio::time::Instant::now() + MOBILITY_TIMER_PARK
+                              );
+                              connection = Some(new_conn.clone());
+                              let _ = send_message(
+                                  &new_conn,
+                                  &WireMessage::Hello {
+                                      version: PROTOCOL_VERSION,
+                                  },
+                                  &evt_tx,
+                              )
+                              .await;
+                              let _ = evt_tx.send(NetEvent::PeerConnected(new_conn.remote_address()));
+                          }
+                          Err(err) => {
+                              let _ = evt_tx.send(NetEvent::Log(format!("erro ao aceitar {err}")));
                         }
                     }
                 }
@@ -503,17 +913,90 @@ async fn run_network_async(
                 match inbound {
                     InboundFrame::Control(message, from) => {
                         if let Some(conn) = connection.as_ref() {
-                            let new_peer = handle_incoming_message(
-                                conn,
-                                message,
-                                from,
-                                &mut connected_peer,
-                                &mut session_dir,
-                                &mut incoming,
-                                &evt_tx,
-                            ).await;
-                            if new_peer {
-                                let _ = evt_tx.send(NetEvent::PeerConnected(from));
+                            match message {
+                                WireMessage::Hello { version } => {
+                                    peer_protocol_version = Some(version);
+                                    heartbeat_inflight = None;
+                                    heartbeat_misses = 0;
+                                    if version >= OBSERVED_ENDPOINT_VERSION
+                                        && mobility.enabled
+                                        && observe_task.is_none()
+                                    {
+                                        observe_task = Some(start_observe_task(
+                                            conn.clone(),
+                                            evt_tx.clone(),
+                                            mobility.observe_interval,
+                                        ));
+                                    }
+                                    let new_peer = handle_incoming_message(
+                                        conn,
+                                        WireMessage::Hello { version },
+                                        from,
+                                        &mut connected_peer,
+                                        &mut session_dir,
+                                        &mut incoming,
+                                        &mut public_endpoint,
+                                        &evt_tx,
+                                    )
+                                    .await;
+                                    if new_peer {
+                                        last_peer = Some(from);
+                                        let _ = evt_tx.send(NetEvent::PeerConnected(from));
+                                    }
+                                    continue;
+                                }
+                                WireMessage::Ping { nonce } => {
+                                    if peer_protocol_version.is_none() {
+                                        peer_protocol_version = Some(HEARTBEAT_VERSION);
+                                    }
+                                    heartbeat_inflight = None;
+                                    heartbeat_misses = 0;
+                                    let _ = send_message(
+                                        conn,
+                                        &WireMessage::Pong { nonce },
+                                        &evt_tx,
+                                    )
+                                    .await;
+                                    if connected_peer.is_none() {
+                                        connected_peer = Some(from);
+                                        last_peer = Some(from);
+                                        let _ = evt_tx.send(NetEvent::PeerConnected(from));
+                                    }
+                                    continue;
+                                }
+                                WireMessage::Pong { .. } => {
+                                    if peer_protocol_version.is_none() {
+                                        peer_protocol_version = Some(HEARTBEAT_VERSION);
+                                    }
+                                    heartbeat_inflight = None;
+                                    heartbeat_misses = 0;
+                                    if connected_peer.is_none() {
+                                        connected_peer = Some(from);
+                                        last_peer = Some(from);
+                                        let _ = evt_tx.send(NetEvent::PeerConnected(from));
+                                    }
+                                    continue;
+                                }
+                                message => {
+                                    heartbeat_inflight = None;
+                                    heartbeat_misses = 0;
+                                    let new_peer = handle_incoming_message(
+                                        conn,
+                                        message,
+                                        from,
+                                        &mut connected_peer,
+                                        &mut session_dir,
+                                        &mut incoming,
+                                        &mut public_endpoint,
+                                        &evt_tx,
+                                    )
+                                    .await;
+                                    if new_peer {
+                                        last_peer = Some(from);
+                                        let _ = evt_tx.send(NetEvent::PeerConnected(from));
+                                    }
+                                    continue;
+                                }
                             }
                         } else {
                             let _ = evt_tx.send(NetEvent::Log("mensagem recebida sem conexao".to_string()));
@@ -524,6 +1007,8 @@ async fn run_network_async(
                             let _ = evt_tx.send(NetEvent::Log("stream recebido sem conexao".to_string()));
                             continue;
                         }
+                        heartbeat_inflight = None;
+                        heartbeat_misses = 0;
 
                         if let Err(err) = handle_incoming_stream(
                             file_id,
@@ -538,6 +1023,7 @@ async fn run_network_async(
                             let _ = evt_tx.send(NetEvent::Log(format!("erro ao receber stream: {err}")));
                         } else if connected_peer.is_none() {
                             connected_peer = Some(from);
+                            last_peer = Some(from);
                             let _ = evt_tx.send(NetEvent::PeerConnected(from));
                         }
                     }
@@ -554,6 +1040,8 @@ async fn run_network_async(
 
     let _ = reader_task.take().map(|t| t.abort());
     let _ = metrics_task.take().map(|t| t.abort());
+    let _ = liveness_task.take().map(|t| t.abort());
+    let _ = observe_task.take().map(|t| t.abort());
     Ok(())
 }
 
@@ -567,14 +1055,22 @@ async fn handle_command(
     cmd_rx: &mut tokio_mpsc::UnboundedReceiver<NetCommand>,
     pending_cmds: &mut Vec<NetCommand>,
     endpoint: &mut Endpoint,
-    inbound_tx: &mut tokio_mpsc::UnboundedSender<InboundFrame>,
+    _inbound_tx: &mut tokio_mpsc::UnboundedSender<InboundFrame>,
     reader_task: &mut Option<tokio::task::JoinHandle<()>>,
     metrics_task: &mut Option<tokio::task::JoinHandle<()>>,
+    connect_tx: &tokio_mpsc::UnboundedSender<ConnectResult>,
+    connect_attempt: &mut Option<ConnectAttempt>,
+    next_connect_id: &mut u64,
+    last_peer: &mut Option<SocketAddr>,
+    liveness_task: &mut Option<tokio::task::JoinHandle<()>>,
+    observe_task: &mut Option<tokio::task::JoinHandle<()>>,
+    public_endpoint: &mut Option<SocketAddr>,
     autotune: &AutotuneConfig,
     autotune_state: &std::sync::Arc<Mutex<AutotuneState>>,
 ) -> io::Result<bool> {
     match cmd {
         NetCommand::ConnectPeer(addr) => {
+            *last_peer = Some(addr);
             let family_mismatch = endpoint
                 .local_addr()
                 .ok()
@@ -593,10 +1089,14 @@ async fn handle_command(
                         let _ = evt_tx.send(NetEvent::Bound(*bind_addr));
                         *connection = None;
                         *connected_peer = None;
+                        *connect_attempt = None;
                         let _ = reader_task.take().map(|t| t.abort());
                         if let Some(task) = metrics_task.take() {
                             task.abort();
                         }
+                        let _ = liveness_task.take().map(|t| t.abort());
+                        let _ = observe_task.take().map(|t| t.abort());
+                        *public_endpoint = stun_res.as_ref().ok().copied().flatten();
                         publish_stun_result(stun_res, evt_tx);
                     }
                     Err(err) => {
@@ -604,22 +1104,40 @@ async fn handle_command(
                     }
                 }
             }
-            *connected_peer = Some(addr);
-            let _ = evt_tx.send(NetEvent::PeerConnecting(addr));
-            if let Some(conn) = connect_peer(endpoint, addr, evt_tx).await {
-                setup_connection_reader(conn.clone(), inbound_tx, evt_tx, reader_task);
+            if connection.is_some() {
+                *connection = None;
+                *connected_peer = None;
+                *connect_attempt = None;
+                if let Some(task) = reader_task.take() {
+                    task.abort();
+                }
                 if let Some(task) = metrics_task.take() {
                     task.abort();
                 }
-                metrics_task.replace(start_autotune_task(
-                    conn.clone(),
-                    autotune.clone(),
-                    autotune_state.clone(),
-                    evt_tx.clone(),
-                ));
-                *connection = Some(conn);
-                let _ = evt_tx.send(NetEvent::PeerConnected(addr));
+                let _ = liveness_task.take().map(|t| t.abort());
+                let _ = observe_task.take().map(|t| t.abort());
             }
+            *connected_peer = Some(addr);
+            let _ = evt_tx.send(NetEvent::PeerConnecting(addr));
+
+            *next_connect_id = next_connect_id.wrapping_add(1);
+            let attempt_id = *next_connect_id;
+            *connect_attempt = Some(ConnectAttempt {
+                id: attempt_id,
+                peer: addr,
+            });
+
+            let endpoint = endpoint.clone();
+            let evt_tx = evt_tx.clone();
+            let connect_tx = connect_tx.clone();
+            tokio::spawn(async move {
+                let connection = connect_peer(&endpoint, addr, &evt_tx).await;
+                let _ = connect_tx.send(ConnectResult {
+                    id: attempt_id,
+                    peer: addr,
+                    connection,
+                });
+            });
         }
         NetCommand::Rebind(_) => {}
         NetCommand::CancelTransfers => {
@@ -863,6 +1381,50 @@ fn apply_autotune_target(
     connection.set_send_window(clamped);
 }
 
+fn start_liveness_task(
+    connection: quinn::Connection,
+    signal_tx: tokio_mpsc::UnboundedSender<ConnSignal>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let peer = connection.remote_address();
+        let err = connection.closed().await;
+        let _ = signal_tx.send(ConnSignal::Closed {
+            peer,
+            error: err.to_string(),
+        });
+    })
+}
+
+fn start_observe_task(
+    connection: quinn::Connection,
+    evt_tx: Sender<NetEvent>,
+    interval: Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        if interval.is_zero() {
+            return;
+        }
+
+        let mut ticker = tokio::time::interval(interval);
+        let closed = connection.closed();
+        tokio::pin!(closed);
+        loop {
+            tokio::select! {
+                _ = &mut closed => break,
+                _ = ticker.tick() => {
+                    let observed = connection.remote_address();
+                    let _ = send_message(
+                        &connection,
+                        &WireMessage::ObservedEndpoint { addr: observed },
+                        &evt_tx,
+                    )
+                    .await;
+                }
+            }
+        }
+    })
+}
+
 fn start_autotune_task(
     connection: quinn::Connection,
     autotune: AutotuneConfig,
@@ -998,15 +1560,21 @@ mod endpoint_tests {
 }
 
 async fn connect_peer(
-    endpoint: &mut Endpoint,
+    endpoint: &Endpoint,
     peer: SocketAddr,
     evt_tx: &Sender<NetEvent>,
 ) -> Option<quinn::Connection> {
     match endpoint.connect(peer, "pasta") {
-        Ok(connecting) => match connecting.await {
-            Ok(connection) => Some(connection),
-            Err(err) => {
+        Ok(connecting) => match tokio::time::timeout(CONNECT_TIMEOUT, connecting).await {
+            Ok(Ok(connection)) => Some(connection),
+            Ok(Err(err)) => {
                 let _ = evt_tx.send(NetEvent::Log(format!("erro ao conectar {err}")));
+                None
+            }
+            Err(_) => {
+                let _ = evt_tx.send(NetEvent::Log(format!(
+                    "tempo esgotado ao conectar {peer} (verifique NAT/firewall)"
+                )));
                 None
             }
         },
@@ -1107,11 +1675,53 @@ async fn read_frame(stream: &mut quinn::RecvStream) -> io::Result<Option<Vec<u8>
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use super::stun::stun_server_list;
 
     #[test]
     fn stun_defaults_not_empty() {
         assert!(!stun_server_list("0.0.0.0:5000".parse().unwrap()).is_empty());
         assert!(!stun_server_list("[::]:5000".parse().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn wire_message_variant_tags_stable() {
+        fn tag(message: &WireMessage) -> u32 {
+            let bytes = serialize_message(message).expect("serialize wire message");
+            u32::from_le_bytes(bytes[..4].try_into().expect("tag bytes"))
+        }
+
+        assert_eq!(
+            tag(&WireMessage::Hello {
+                version: PROTOCOL_VERSION,
+            }),
+            0
+        );
+        assert_eq!(tag(&WireMessage::Punch { nonce: 0 }), 1);
+        assert_eq!(tag(&WireMessage::Cancel { file_id: 0 }), 2);
+        assert_eq!(
+            tag(&WireMessage::FileMeta {
+                file_id: 0,
+                name: "file.bin".to_string(),
+                size: 0,
+            }),
+            3
+        );
+        assert_eq!(
+            tag(&WireMessage::FileChunk {
+                file_id: 0,
+                data: Vec::new(),
+            }),
+            4
+        );
+        assert_eq!(tag(&WireMessage::FileDone { file_id: 0 }), 5);
+        assert_eq!(
+            tag(&WireMessage::ObservedEndpoint {
+                addr: "127.0.0.1:1".parse().expect("addr"),
+            }),
+            6
+        );
+        assert_eq!(tag(&WireMessage::Ping { nonce: 0 }), 7);
+        assert_eq!(tag(&WireMessage::Pong { nonce: 0 }), 8);
     }
 }

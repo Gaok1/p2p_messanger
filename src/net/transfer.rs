@@ -15,7 +15,10 @@ use tokio::{
     task,
 };
 
-use super::{NetCommand, NetEvent, WireMessage, serialize_message};
+use super::{
+    NetCommand, NetEvent, OBSERVED_ENDPOINT_VERSION, PROTOCOL_VERSION, WireMessage,
+    serialize_message,
+};
 
 /// Representa um arquivo que está chegando do par.
 pub(crate) struct IncomingTransfer {
@@ -39,6 +42,7 @@ pub(crate) async fn handle_incoming_message(
     peer_addr: &mut Option<SocketAddr>,
     session_dir: &mut Option<PathBuf>,
     incoming: &mut HashMap<u64, IncomingTransfer>,
+    public_endpoint: &mut Option<SocketAddr>,
     evt_tx: &Sender<NetEvent>,
 ) -> bool {
     let mut new_peer = false;
@@ -48,15 +52,36 @@ pub(crate) async fn handle_incoming_message(
     }
 
     match message {
-        WireMessage::Hello { .. } => {
+        WireMessage::Hello { version } => {
             if session_dir.is_none() {
                 if let Err(err) = ensure_session_dir(session_dir, evt_tx).await {
                     let _ = evt_tx.send(NetEvent::Log(format!("erro na sessao {err}")));
                 }
             }
+            if version >= OBSERVED_ENDPOINT_VERSION {
+                let _ = send_message(
+                    connection,
+                    &WireMessage::ObservedEndpoint { addr: from },
+                    evt_tx,
+                )
+                .await;
+            }
+        }
+        WireMessage::ObservedEndpoint { addr } => {
+            if *public_endpoint != Some(addr) {
+                *public_endpoint = Some(addr);
+                let _ = evt_tx.send(NetEvent::PublicEndpoint(addr));
+            }
         }
         WireMessage::Punch { .. } => {
-            let _ = send_message(connection, &WireMessage::Hello { version: 1 }, evt_tx).await;
+            let _ = send_message(
+                connection,
+                &WireMessage::Hello {
+                    version: PROTOCOL_VERSION,
+                },
+                evt_tx,
+            )
+            .await;
         }
         WireMessage::Cancel { file_id } => {
             if let Some(entry) = incoming.remove(&file_id) {
@@ -260,7 +285,14 @@ pub(crate) async fn send_files(
     pending_cmds: &mut Vec<NetCommand>,
     chunk_size: usize,
 ) -> io::Result<SendOutcome> {
-    let _ = send_message(connection, &WireMessage::Hello { version: 1 }, evt_tx).await;
+    let _ = send_message(
+        connection,
+        &WireMessage::Hello {
+            version: PROTOCOL_VERSION,
+        },
+        evt_tx,
+    )
+    .await;
 
     for path in files {
         match handle_send_control(cmd_rx, pending_cmds) {

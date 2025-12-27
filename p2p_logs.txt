@@ -1,99 +1,297 @@
 transporte QUIC: streams confiaveis com TLS 1.3
-dados de arquivo: streams unidirecionais com chunks de 16384 bytes
-stun erro STUN sem resposta (enviados: 7), destinos: [2606:4700:49::]:3478, [2001:4860:4864:5:8000::1]:19302, [2001:4860:4864:5:8000::1]:19302, [2001:4860:4864:5:8000::1]:19302, [2001:4860:4864:5:8000::1]:19302, [2001:4860:4864:5:8000::1]:19302, ...
+dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+endpoint publico [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:52519
+copiado [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:52519
+ip colado
+conectando [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:56945
+conectado [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:56945
+conexao encerrada closed by peer: 0
+conectado [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:56945
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=AQAAAAEAAAAoBCSIoITqcLAwi8F+gw2UJ80=
+autotune inflight: min_rtt=31.08ms srtt=31.08ms rate=0.01 Mbps bdp=414 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=31.08ms rate=0.01 Mbps bdp=335 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=31.08ms rate=0.01 Mbps bdp=244 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=31.08ms rate=0.01 Mbps bdp=198 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=31.08ms rate=0.01 Mbps bdp=160 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=36.96ms rate=0.00 Mbps bdp=130 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=36.96ms rate=0.00 Mbps bdp=94 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=36.96ms rate=0.00 Mbps bdp=69 B target=256.0 KiB
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=AQAAAAEAAAAoBCSIoITqcLAwi8F+gw2UJ80=
+autotune inflight: min_rtt=31.08ms srtt=41.37ms rate=0.00 Mbps bdp=50 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=41.37ms rate=0.00 Mbps bdp=36 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=41.37ms rate=0.00 Mbps bdp=26 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=41.37ms rate=0.00 Mbps bdp=21 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=42.24ms rate=0.00 Mbps bdp=15 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=42.24ms rate=0.00 Mbps bdp=12 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=42.24ms rate=0.00 Mbps bdp=10 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=42.24ms rate=0.00 Mbps bdp=7 B target=256.0 KiB
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=AQAAAAEAAAAoBCSIoITqcLAwi8F+gw2UJ80=
+autotune inflight: min_rtt=31.08ms srtt=41.56ms rate=0.00 Mbps bdp=6 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=41.56ms rate=0.00 Mbps bdp=4 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=41.56ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=41.56ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=42.07ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=42.07ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=42.07ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=42.07ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=AQAAAAEAAAAoBCSIoITqcLAwi8F+gw2UJ80=
+autotune inflight: min_rtt=31.08ms srtt=39.25ms rate=0.00 Mbps bdp=10 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=39.25ms rate=0.00 Mbps bdp=7 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=39.25ms rate=0.00 Mbps bdp=5 B target=256.0 KiB
+enviado C:\Users\ferna\Downloads\opera_zC6Sla8h8M.png
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=AQAAAAEAAAAoBCSIoITqcLAwi8F+gw2UJ80=
+autotune inflight: min_rtt=31.08ms srtt=44.31ms rate=0.13 Mbps bdp=3.8 KiB target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=53.18ms rate=0.16 Mbps bdp=4.9 KiB target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=53.18ms rate=0.12 Mbps bdp=3.6 KiB target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=53.18ms rate=0.10 Mbps bdp=2.9 KiB target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=53.18ms rate=0.07 Mbps bdp=2.1 KiB target=256.0 KiB
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=AQAAAAEAAAAoBCSIoITqcLAwi8F+gw2UJ80=
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.06 Mbps bdp=1.7 KiB target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.05 Mbps bdp=1.4 KiB target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.03 Mbps bdp=1.0 KiB target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.02 Mbps bdp=751 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.02 Mbps bdp=609 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.02 Mbps bdp=493 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.01 Mbps bdp=399 B target=256.0 KiB
+conectando [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:56945
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.01 Mbps bdp=291 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.01 Mbps bdp=212 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=154 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=125 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=91 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=74 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=59 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=48 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=35 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=28 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=23 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=16 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=12 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=9 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=7 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=5 B target=256.0 KiB
+ip colado
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+autotune inflight: min_rtt=31.08ms srtt=52.97ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
 transporte QUIC: streams confiaveis com TLS 1.3
-dados de arquivo: streams unidirecionais com chunks de 16384 bytes
-stun trace: start bind=[::]:58812 read_timeout=200ms
-stun trace: servers=stun.cloudflare.com:3478, stun.l.google.com:19302, stun1.l.google.com:19302, stun2.l.google.com:19302, stun3.l.google.com:19302, stun4.l.google.com:19302, stun.nextcloud.com:443
-stun trace: resolve stun.cloudflare.com:3478 -> [2606:4700:49::]:3478
-stun trace: send server=stun.cloudflare.com:3478 to=[2606:4700:49::]:3478 txid=000000001884c9b155e638c9 bytes=20
-stun trace: resolve stun.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
-stun trace: send server=stun.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b155e638ca bytes=20
-stun trace: resolve stun1.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
-stun trace: send server=stun1.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b155e638cb bytes=20
-stun trace: resolve stun2.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
-stun trace: send server=stun2.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b155e638cc bytes=20
-stun trace: resolve stun3.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
-stun trace: send server=stun3.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b155e638cd bytes=20
-stun trace: resolve stun4.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
-stun trace: send server=stun4.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b155e638ce bytes=20
-stun trace: resolve stun.nextcloud.com:443 -> [2a01:4f8:c17:8f74::1]:443
-stun trace: send server=stun.nextcloud.com:443 to=[2a01:4f8:c17:8f74::1]:443 txid=000000001884c9b155e638cf bytes=20
-stun trace: TIMEOUT elapsed=7229ms sent=7 recv=0 parsed=0
-stun erro STUN sem resposta (bind=[::]:58812, enviados: 7, recebidos: 0, parsed: 0, elapsed=7229ms), destinos: [2606:4700:49::]:3478, [2001:4860:4864:5:8000::1]:19302 (x5), [2a01:4f8:c17:8f74::1]:443
-reconfigurando bind para 0.0.0.0:58812
-endpoint publico 152.237.164.251:60594
-reconfigurando bind para [::]:58812
-stun trace: start bind=[::]:58812 read_timeout=200ms
-stun trace: servers=stun.cloudflare.com:3478, stun.l.google.com:19302, stun1.l.google.com:19302, stun2.l.google.com:19302, stun3.l.google.com:19302, stun4.l.google.com:19302, stun.nextcloud.com:443
-stun trace: resolve stun.cloudflare.com:3478 -> [2606:4700:49::]:3478
-stun trace: send server=stun.cloudflare.com:3478 to=[2606:4700:49::]:3478 txid=000000001884c9b64cc726bd bytes=20
-stun trace: resolve stun.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
-stun trace: send server=stun.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b64cc726be bytes=20
-stun trace: resolve stun1.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
-stun trace: send server=stun1.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b64cc726bf bytes=20
-stun trace: resolve stun2.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
-stun trace: send server=stun2.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b64cc726c0 bytes=20
-stun trace: resolve stun3.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
-stun trace: send server=stun3.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b64cc726c1 bytes=20
-stun trace: resolve stun4.l.google.com:19302 -> [2001:4860:4864:5:8000::1]:19302
-stun trace: send server=stun4.l.google.com:19302 to=[2001:4860:4864:5:8000::1]:19302 txid=000000001884c9b64cc726c2 bytes=20
-stun trace: resolve stun.nextcloud.com:443 -> [2a01:4f8:c17:8f74::1]:443
-stun trace: send server=stun.nextcloud.com:443 to=[2a01:4f8:c17:8f74::1]:443 txid=000000001884c9b64cc726c3 bytes=20
-stun trace: TIMEOUT elapsed=7109ms sent=7 recv=0 parsed=0
-stun erro STUN sem resposta (bind=[::]:58812, enviados: 7, recebidos: 0, parsed: 0, elapsed=7109ms), destinos: [2606:4700:49::]:3478, [2001:4860:4864:5:8000::1]:19302 (x5), [2a01:4f8:c17:8f74::1]:443
+dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+endpoint publico [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:55825
+ip colado
+conectando [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:58901
 transporte QUIC: streams confiaveis com TLS 1.3
-dados de arquivo: streams unidirecionais com chunks de 16384 bytes
-endpoint publico [2804:d45:9a05:f400:a5c0:7216:31a8:44f8]:62834
-reconfigurando bind para 0.0.0.0:62834
-endpoint publico 152.237.164.251:58772
-reconfigurando bind para [::]:62834
-endpoint publico [2804:d45:9a05:f400:a5c0:7216:31a8:44f8]:62834
-reconfigurando bind para 0.0.0.0:62834
-endpoint publico 152.237.164.251:58772
-reconfigurando bind para [::]:62834
-endpoint publico [2804:d45:9a05:f400:a5c0:7216:31a8:44f8]:62834
-reconfigurando bind para 0.0.0.0:62834
-endpoint publico 152.237.164.251:58772
-reconfigurando bind para [::]:62834
-endpoint publico [2804:d45:9a05:f400:a5c0:7216:31a8:44f8]:62834
-transporte QUIC: streams confiaveis com TLS 1.3
-dados de arquivo: streams unidirecionais com chunks de 16384 bytes
-endpoint publico [2804:d45:9a05:f400:a5c0:7216:31a8:44f8]:55456
+dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+endpoint publico [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:49933
+copiado [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:49933
 mouse livre: selecione o texto no terminal (pressione 'm' para voltar)
 mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)
-reconfigurando bind para 0.0.0.0:55456
-endpoint publico 152.237.164.251:58558
-copiado 152.237.164.251:58558
 ip colado
-conectando 177.137.82.48:24287
-erro ao conectar timed out
-copiado 152.237.164.251:58558
-erro ao aceitar timed out
-reconfigurando bind para [::]:55456
-endpoint publico [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:55456
-reconfigurando bind para 0.0.0.0:55456
-endpoint publico 152.237.164.251:58558
-copiado 152.237.164.251:58558
-conectado 177.137.82.48:24583
-enviado C:\Users\gaok1\Downloads\docs\GOJO.jpg
-enviado C:\Users\gaok1\Downloads\docs\1dc863b0-9d13-43a7-bc3f-128a11b0bb0d.jpg
-enviado C:\Users\gaok1\Downloads\docs\3.png
-enviado C:\Users\gaok1\Downloads\docs\3c11066d-b2d0-4396-a1f8-16a006a136ac.jpg
-enviado C:\Users\gaok1\Downloads\docs\5f7a1d05-7e3e-4a9b-ac95-4ead4189f22d.jpg
-diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33
-recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.21 - 20.39.47.04.mp4
+conectando [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:62117
+conectado [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:62117
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=AQAAAAEAAAAoBCSIoITqcLAwi8F+gw2UDcM=
+autotune inflight: min_rtt=31.63ms srtt=37.37ms rate=0.01 Mbps bdp=453 B target=256.0 KiB
+autotune inflight: min_rtt=31.63ms srtt=37.37ms rate=0.01 Mbps bdp=367 B target=256.0 KiB
+autotune inflight: min_rtt=31.63ms srtt=37.37ms rate=0.01 Mbps bdp=268 B target=256.0 KiB
+autotune inflight: min_rtt=31.63ms srtt=37.37ms rate=0.01 Mbps bdp=195 B target=256.0 KiB
+autotune inflight: min_rtt=31.63ms srtt=37.37ms rate=0.01 Mbps bdp=158 B target=256.0 KiB
+diretorio da sessao C:\Users\ferna\Downloads\pasta_p2p (2)\received\2025-12-26_18-58-28
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=BAAAAAEAAAAAAAAACgAAAAAAAABIb2xsb3cucmFygps+AAAA
+autotune inflight: min_rtt=31.63ms srtt=35.42ms rate=0.00 Mbps bdp=128 B target=256.0 KiB
+autotune inflight: min_rtt=31.63ms srtt=35.42ms rate=0.00 Mbps bdp=93 B target=256.0 KiB
+autotune inflight: min_rtt=31.63ms srtt=35.42ms rate=0.00 Mbps bdp=75 B target=256.0 KiB
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=AQAAAAEAAAAoBCSIoITqcLAwi8F+gw2UDcM=
+autotune inflight: min_rtt=31.63ms srtt=35.76ms rate=0.00 Mbps bdp=61 B target=256.0 KiB
+enviado C:\Users\ferna\Downloads\ftc-prova3-0217-ex-extra.pdf
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=AQAAAAEAAAAoBCSIoITqcLAwi8F+gw2UDcM=
+autotune inflight: min_rtt=28.18ms srtt=28.18ms rate=0.35 Mbps bdp=9.6 KiB target=256.0 KiB
+autotune inflight: min_rtt=28.18ms srtt=28.18ms rate=0.25 Mbps bdp=7.0 KiB target=256.0 KiB
+autotune inflight: min_rtt=28.18ms srtt=28.18ms rate=0.21 Mbps bdp=5.7 KiB target=256.0 KiB
+autotune inflight: min_rtt=28.18ms srtt=28.18ms rate=0.17 Mbps bdp=4.6 KiB target=256.0 KiB
+autotune inflight: min_rtt=28.18ms srtt=28.86ms rate=0.12 Mbps bdp=3.3 KiB target=256.0 KiB
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=BAAAAAIAAAAAAAAACgAAAAAAAABIb2xsb3cucmFygps+AAAA
+autotune inflight: min_rtt=28.10ms srtt=28.10ms rate=0.10 Mbps bdp=2.7 KiB target=256.0 KiB
+autotune inflight: min_rtt=28.10ms srtt=28.10ms rate=0.08 Mbps bdp=2.2 KiB target=256.0 KiB
+autotune inflight: min_rtt=28.10ms srtt=28.10ms rate=0.06 Mbps bdp=1.8 KiB target=256.0 KiB
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=AQAAAAEAAAAoBCSIoITqcLAwi8F+gw2UDcM=
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=BAAAAAMAAAAAAAAACgAAAAAAAABIb2xsb3cucmFygps+AAAA
+autotune inflight: min_rtt=28.10ms srtt=31.02ms rate=0.05 Mbps bdp=1.3 KiB target=256.0 KiB
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=BAAAAAQAAAAAAAAACgAAAAAAAABIb2xsb3cucmFygps+AAAA
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=BAAAAAUAAAAAAAAACgAAAAAAAABIb2xsb3cucmFygps+AAAA
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=BAAAAAYAAAAAAAAACgAAAAAAAABIb2xsb3cucmFygps+AAAA
+erro ao decodificar Slice had bytes remaining after deserialization; payload(base64)=BAAAAAcAAAAAAAAACgAAAAAAAABIb2xsb3cucmFygps+AAAA
+autotune inflight: min_rtt=28.10ms srtt=31.20ms rate=0.03 Mbps bdp=963 B target=256.0 KiB
+autotune inflight: min_rtt=28.10ms srtt=31.20ms rate=0.03 Mbps bdp=780 B target=256.0 KiB
+autotune inflight: min_rtt=28.10ms srtt=31.20ms rate=0.02 Mbps bdp=632 B target=256.0 KiBtransporte QUIC: streams confiaveis com TLS 1.3
+dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+endpoint publico [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:51391
+copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:51391
+conectado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:61003
+diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_23-00-55
+endpoint publico [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:51391
+autotune inflight: min_rtt=1.31ms srtt=1.31ms rate=0.01 Mbps bdp=7 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.31ms rate=0.00 Mbps bdp=6 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.31ms rate=0.00 Mbps bdp=4 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.31ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.93ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.93ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.93ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.93ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.93ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.72ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.72ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.72ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=1.72ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=2.39ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=2.39ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=2.39ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=2.39ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=2.13ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=2.13ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=2.13ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=1.31ms srtt=2.70ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_23-00-55\HTB.rar
+autotune inflight: min_rtt=270.79µs srtt=270.79µs rate=0.15 Mbps bdp=40 B target=256.0 KiB
+autotune inflight: min_rtt=270.79µs srtt=336.50µs rate=0.15 Mbps bdp=41 B target=256.0 KiB
+autotune inflight: min_rtt=270.79µs srtt=362.46µs rate=0.14 Mbps bdp=37 B target=256.0 KiB
+autotune inflight: min_rtt=263.44µs srtt=263.44µs rate=0.15 Mbps bdp=38 B target=256.0 KiB
+autotune inflight: min_rtt=263.44µs srtt=312.20µs rate=0.16 Mbps bdp=43 B target=256.0 KiB
+autotune inflight: min_rtt=263.44µs srtt=263.68µs rate=0.13 Mbps bdp=34 B target=256.0 KiB
+autotune inflight: min_rtt=252.08µs srtt=348.61µs rate=0.16 Mbps bdp=40 B target=256.0 KiB
+autotune inflight: min_rtt=252.08µs srtt=288.66µs rate=0.16 Mbps bdp=41 B target=256.0 KiB
+autotune inflight: min_rtt=247.30µs srtt=247.30µs rate=0.14 Mbps bdp=34 B target=256.0 KiB
+autotune inflight: min_rtt=229.00µs srtt=287.13µs rate=0.11 Mbps bdp=25 B target=256.0 KiB
+autotune inflight: min_rtt=229.00µs srtt=360.82µs rate=0.09 Mbps bdp=20 B target=256.0 KiB
+autotune inflight: min_rtt=229.00µs srtt=269.49µs rate=0.14 Mbps bdp=33 B target=256.0 KiB
+transporte QUIC: streams confiaveis com TLS 1.3
+dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+endpoint publico [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:50994
+copiado [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:50994
+ip colado
+conectando [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081
+simultaneo: mantendo conexao de saida (local=Some([2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:50994) < peer=[2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081), ignorando entrada [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081
+conectado [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081
+autotune inflight: min_rtt=32.02ms srtt=108.90ms rate=0.01 Mbps bdp=354 B target=256.0 KiB
+autotune inflight: min_rtt=32.02ms srtt=108.90ms rate=0.01 Mbps bdp=287 B target=256.0 KiB
+autotune inflight: min_rtt=32.02ms srtt=108.90ms rate=0.01 Mbps bdp=209 B target=256.0 KiB
+autotune inflight: min_rtt=32.02ms srtt=108.90ms rate=0.00 Mbps bdp=152 B target=256.0 KiB
+autotune inflight: min_rtt=32.02ms srtt=108.90ms rate=0.00 Mbps bdp=123 B target=256.0 KiB
+autotune inflight: min_rtt=32.02ms srtt=33.28ms rate=0.39 Mbps bdp=12.3 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=31.54ms rate=4.64 Mbps bdp=123.4 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.77ms rate=4.42 Mbps bdp=117.5 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.95ms rate=3.58 Mbps bdp=95.2 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=27.86ms rate=5.74 Mbps bdp=152.6 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=35.61ms rate=5.73 Mbps bdp=152.6 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=29.50ms rate=5.69 Mbps bdp=151.4 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=27.71ms rate=4.61 Mbps bdp=122.6 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=34.68ms rate=3.87 Mbps bdp=102.9 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=27.83ms rate=5.07 Mbps bdp=135.0 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=31.61ms rate=4.11 Mbps bdp=109.3 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=48.73ms rate=3.47 Mbps bdp=92.3 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=27.66ms rate=4.47 Mbps bdp=118.8 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=5.03 Mbps bdp=133.9 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=3.67 Mbps bdp=97.6 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=2.97 Mbps bdp=79.1 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=2.41 Mbps bdp=64.0 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=1.95 Mbps bdp=51.9 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=1.42 Mbps bdp=37.8 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=1.15 Mbps bdp=30.6 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.93 Mbps bdp=24.8 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.68 Mbps bdp=18.1 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.50 Mbps bdp=13.2 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.36 Mbps bdp=9.6 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.29 Mbps bdp=7.8 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.24 Mbps bdp=6.3 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.17 Mbps bdp=4.6 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.14 Mbps bdp=3.7 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.10 Mbps bdp=2.7 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.08 Mbps bdp=2.2 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.06 Mbps bdp=1.6 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.05 Mbps bdp=1.3 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.04 Mbps bdp=1.1 KiB target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.03 Mbps bdp=785 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.02 Mbps bdp=572 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.02 Mbps bdp=463 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.01 Mbps bdp=337 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.01 Mbps bdp=246 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.01 Mbps bdp=199 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.01 Mbps bdp=145 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=117 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=95 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=69 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=56 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=45 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=36 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=26 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=21 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=17 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=14 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=10 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=7 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=6 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=4 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+copiado [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:50994
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=0 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=30.06ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+erro ao enviar connection lost
+conexao encerrada timed out
 cancelamento solicitado
 cancelamento solicitado
-recebimento cancelado C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.21 - 20.39.47.04.mp4
-recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.12 - 16.55.57.01.mp4
-recebimento cancelado C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.12 - 16.55.57.01.mp4
-recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.12 - 16.55.57.01.mp4
-recebimento cancelado C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\Desktop 2025.12.12 - 16.55.57.01.mp4
-recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
-recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
-recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
-recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
-abrindo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
-abrindo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
-abrindo pasta C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_13-08-33\anime-wow-sound-effect.mp3
+conexao perdida [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081: timed out
+tempo esgotado [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081
+parceiro nao definido
+parceiro nao definido
+parceiro nao definido
+parceiro nao definido
+parceiro nao definido
+parceiro nao definido
+parceiro nao definido
+parceiro nao definido
+parceiro nao definido
+parceiro nao definido
+conectando [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081
+conexao recebida de [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:53273 (aguardando [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081), ignorando
+tempo esgotado ao conectar [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081 (verifique NAT/firewall)
+tempo esgotado [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081
+reconectando [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081 em 500ms
+conectando [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081
+tempo esgotado ao conectar [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081 (verifique NAT/firewall)
+tempo esgotado [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081
+reconectando [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081 em 1000ms
+conectando [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081
+ip colado
+conectando [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:53273
+conectado [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:53273
+autotune inflight: min_rtt=27.24ms srtt=51.13ms rate=0.01 Mbps bdp=285 B target=256.0 KiB
+diretorio da sessao C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_23-04-14
+recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_23-04-14\8fdbfedd-afc7-4b79-9a08-1ddf631eaad6.webp
+recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_23-04-14\8fdbfedd-afc7-4b79-9a08-1ddf631eaad6.webp
+autotune inflight: min_rtt=27.24ms srtt=69.87ms rate=0.01 Mbps bdp=208 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=69.87ms rate=0.01 Mbps bdp=151 B target=256.0 KiB
+tempo esgotado ao conectar [2804:2488:a084:ea70:b030:8bc1:7e83:d94]:57081 (verifique NAT/firewall)
+autotune inflight: min_rtt=27.24ms srtt=69.87ms rate=0.00 Mbps bdp=123 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=69.87ms rate=0.00 Mbps bdp=99 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=69.87ms rate=0.00 Mbps bdp=80 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=66.67ms rate=0.00 Mbps bdp=65 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=66.67ms rate=0.00 Mbps bdp=52 B target=256.0 KiB
+abrindo pasta C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-26_23-04-14\8fdbfedd-afc7-4b79-9a08-1ddf631eaad6.webp
+autotune inflight: min_rtt=27.24ms srtt=66.67ms rate=0.00 Mbps bdp=38 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=66.67ms rate=0.00 Mbps bdp=28 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=62.54ms rate=0.00 Mbps bdp=20 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=62.54ms rate=0.00 Mbps bdp=16 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=62.54ms rate=0.00 Mbps bdp=13 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=62.54ms rate=0.00 Mbps bdp=9 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=62.54ms rate=0.00 Mbps bdp=7 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=62.54ms rate=0.00 Mbps bdp=5 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=62.54ms rate=0.00 Mbps bdp=4 B target=256.0 KiB
+autotune inflight: min_rtt=27.24ms srtt=62.54ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+transporte QUIC: streams confiaveis com TLS 1.3
+dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+endpoint publico [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:62868

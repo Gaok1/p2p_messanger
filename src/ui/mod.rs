@@ -90,6 +90,7 @@ enum ConnectStatus {
     Idle,
     Connecting(SocketAddr),
     Connected(SocketAddr),
+    Disconnected(SocketAddr),
     Timeout(SocketAddr),
 }
 
@@ -99,6 +100,7 @@ impl ConnectStatus {
             ConnectStatus::Idle => "aguardando".to_string(),
             ConnectStatus::Connecting(addr) => format!("conectando {addr}"),
             ConnectStatus::Connected(addr) => format!("conectado {addr}"),
+            ConnectStatus::Disconnected(addr) => format!("desconectado {addr}"),
             ConnectStatus::Timeout(addr) => format!("tempo esgotado {addr}"),
         }
     }
@@ -607,6 +609,13 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
             app.connect_status = ConnectStatus::Connected(addr);
             app.push_log(format!("conectado {addr}"));
         }
+        NetEvent::PeerDisconnected(addr) => {
+            if app.peer_addr == Some(addr) {
+                app.peer_addr = None;
+            }
+            app.connect_status = ConnectStatus::Disconnected(addr);
+            app.push_log(format!("desconectado {addr}"));
+        }
         NetEvent::PeerTimeout(addr) => {
             if app.peer_addr == Some(addr) {
                 app.peer_addr = None;
@@ -902,6 +911,7 @@ fn status_color(theme: Theme, status: &ConnectStatus) -> Color {
         ConnectStatus::Idle => theme.info,
         ConnectStatus::Connecting(_) => theme.warn,
         ConnectStatus::Connected(_) => theme.ok,
+        ConnectStatus::Disconnected(_) => theme.warn,
         ConnectStatus::Timeout(_) => theme.warn,
     }
 }
@@ -1560,6 +1570,7 @@ fn render_connection_panel(
     let connect_label = match &app.connect_status {
         ConnectStatus::Connecting(_) => "Conectando",
         ConnectStatus::Connected(_) => "Reconectar",
+        ConnectStatus::Disconnected(_) => "Reconectar",
         ConnectStatus::Timeout(_) => "Tentar",
         ConnectStatus::Idle => "Conectar",
     };
