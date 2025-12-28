@@ -19,8 +19,8 @@ mod stun;
 mod transfer;
 
 use transfer::{
-    IncomingTransfer, SendOutcome, handle_incoming_message, handle_incoming_stream, send_files,
-    send_message,
+    IncomingTransfer, SendOutcome, SendResult, handle_incoming_message, handle_incoming_stream,
+    send_files, send_message,
 };
 
 const CHUNK_SIZE: usize = 64 * 1024;
@@ -294,6 +294,50 @@ fn decode_payload(payload: &[u8]) -> Result<WireMessage, String> {
     }
 }
 
+fn spawn_send_task(
+    files: Vec<PathBuf>,
+    connection: &Option<quinn::Connection>,
+    connected_peer: Option<SocketAddr>,
+    next_file_id: u64,
+    evt_tx: &Sender<NetEvent>,
+) -> Option<(
+    tokio::task::JoinHandle<io::Result<SendResult>>,
+    tokio_mpsc::UnboundedSender<NetCommand>,
+)> {
+    let Some(peer) = connected_peer else {
+        let _ = evt_tx.send(NetEvent::Log(
+            "nenhum par conectado para enviar arquivos".to_string(),
+        ));
+        return None;
+    };
+
+    let Some(connection) = connection else {
+        let _ = evt_tx.send(NetEvent::Log(
+            "nenhuma conexao ativa para enviar arquivos".to_string(),
+        ));
+        return None;
+    };
+
+    let (cmd_tx, mut cmd_rx) = tokio_mpsc::unbounded_channel::<NetCommand>();
+    let conn = connection.clone();
+    let evt_tx_clone = evt_tx.clone();
+
+    let handle = tokio::spawn(async move {
+        send_files(
+            &conn,
+            peer,
+            &files,
+            next_file_id,
+            &evt_tx_clone,
+            &mut cmd_rx,
+            CHUNK_SIZE,
+        )
+        .await
+    });
+
+    Some((handle, cmd_tx))
+}
+
 /// Comandos enviados pela UI para a thread de rede.
 pub enum NetCommand {
     ConnectPeer(SocketAddr),
@@ -434,6 +478,8 @@ async fn run_network_async(
     let (completion_tx, mut completion_rx) = tokio_mpsc::unbounded_channel::<u64>();
     let mut reader_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut metrics_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut send_task: Option<tokio::task::JoinHandle<io::Result<SendResult>>> = None;
+    let mut send_cmd_tx: Option<tokio_mpsc::UnboundedSender<NetCommand>> = None;
     let mut connection: Option<quinn::Connection> = None;
     let mut peer_protocol_version: Option<u8> = None;
     let mut heartbeat_tick = tokio::time::interval(HEARTBEAT_INTERVAL);
@@ -465,32 +511,70 @@ async fn run_network_async(
         if !pending_cmds.is_empty() {
             let queued: Vec<_> = pending_cmds.drain(..).collect();
             for cmd in queued {
-                let exit = handle_command(
-                    cmd,
-                    &mut bind_addr,
-                    &mut connected_peer,
-                    &mut connection,
-                    &mut next_file_id,
-                    &evt_tx,
-                    &mut cmd_rx,
-                    &mut pending_cmds,
-                    &mut endpoint,
-                    &mut inbound_tx,
-                    &mut reader_task,
-                    &mut metrics_task,
-                    &connect_tx,
-                    &mut connect_attempt,
-                    &mut next_connect_id,
-                    &mut last_peer,
-                    &mut liveness_task,
-                    &mut observe_task,
-                    &mut public_endpoint,
-                    &autotune,
-                    &autotune_state,
-                )
-                .await?;
-                if exit {
-                    return Ok(());
+                match cmd {
+                    NetCommand::SendFiles(files) => {
+                        if send_task.is_some() {
+                            let _ = evt_tx
+                                .send(NetEvent::Log("ja existe um envio em andamento".to_string()));
+                            continue;
+                        }
+
+                        if let Some((task, tx)) = spawn_send_task(
+                            files.clone(),
+                            &connection,
+                            connected_peer,
+                            next_file_id,
+                            &evt_tx,
+                        ) {
+                            send_task = Some(task);
+                            send_cmd_tx = Some(tx);
+                        } else {
+                            pending_cmds.push(NetCommand::SendFiles(files));
+                        }
+                    }
+                    NetCommand::Rebind(addr) if send_task.is_some() => {
+                        if let Some(tx) = &send_cmd_tx {
+                            let _ = tx.send(NetCommand::Rebind(addr));
+                        }
+                        pending_cmds.push(NetCommand::Rebind(addr));
+                        continue;
+                    }
+                    NetCommand::CancelTransfers if send_task.is_some() => {
+                        if let Some(tx) = &send_cmd_tx {
+                            let _ = tx.send(NetCommand::CancelTransfers);
+                        }
+                        let _ = evt_tx.send(NetEvent::Log("cancelamento solicitado".to_string()));
+                        continue;
+                    }
+                    other => {
+                        let exit = handle_command(
+                            other,
+                            &mut bind_addr,
+                            &mut connected_peer,
+                            &mut connection,
+                            &mut next_file_id,
+                            &evt_tx,
+                            &mut cmd_rx,
+                            &mut pending_cmds,
+                            &mut endpoint,
+                            &mut inbound_tx,
+                            &mut reader_task,
+                            &mut metrics_task,
+                            &connect_tx,
+                            &mut connect_attempt,
+                            &mut next_connect_id,
+                            &mut last_peer,
+                            &mut liveness_task,
+                            &mut observe_task,
+                            &mut public_endpoint,
+                            &autotune,
+                            &autotune_state,
+                        )
+                        .await?;
+                        if exit {
+                            return Ok(());
+                        }
+                    }
                 }
             }
         }
@@ -498,6 +582,30 @@ async fn run_network_async(
         tokio::select! {
             cmd = cmd_rx.recv() => {
                 match cmd {
+                    Some(NetCommand::SendFiles(files)) => {
+                        if send_task.is_some() {
+                            let _ = evt_tx.send(NetEvent::Log(
+                                "ja existe um envio em andamento".to_string(),
+                            ));
+                            continue;
+                        }
+
+                        if let Some((task, tx)) =
+                            spawn_send_task(files.clone(), &connection, connected_peer, next_file_id, &evt_tx)
+                        {
+                            send_task = Some(task);
+                            send_cmd_tx = Some(tx);
+                        } else {
+                            pending_cmds.push(NetCommand::SendFiles(files));
+                        }
+                    }
+                    Some(NetCommand::Rebind(new_bind)) if send_task.is_some() => {
+                        if let Some(tx) = &send_cmd_tx {
+                            let _ = tx.send(NetCommand::Rebind(new_bind));
+                        }
+                        pending_cmds.push(NetCommand::Rebind(new_bind));
+                        continue;
+                    }
                     Some(NetCommand::Rebind(new_bind)) => {
                         if new_bind != bind_addr {
                             let _ = evt_tx.send(NetEvent::Log(format!("reconfigurando bind para {new_bind}")));
@@ -542,6 +650,13 @@ async fn run_network_async(
                             }
                         }
                     }
+                    Some(NetCommand::CancelTransfers) if send_task.is_some() => {
+                        if let Some(tx) = &send_cmd_tx {
+                            let _ = tx.send(NetCommand::CancelTransfers);
+                        }
+                        let _ = evt_tx.send(NetEvent::Log("cancelamento solicitado".to_string()));
+                        continue;
+                    }
                     Some(other) => {
                         if mobility.enabled && matches!(other, NetCommand::ConnectPeer(_)) {
                             reconnect = None;
@@ -549,6 +664,11 @@ async fn run_network_async(
                             reconnect_sleep
                                 .as_mut()
                                 .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
+                        }
+                        if matches!(other, NetCommand::Shutdown) {
+                            if let Some(tx) = &send_cmd_tx {
+                                let _ = tx.send(NetCommand::Shutdown);
+                            }
                         }
                         let exit = handle_command(
                             other,
@@ -624,6 +744,40 @@ async fn run_network_async(
                             reconnect_deadline = Some(next);
                             reconnect_sleep.as_mut().reset(next);
                         }
+                    }
+                }
+            }
+            Some(send_result) = async {
+                if let Some(task) = send_task.as_mut() {
+                    Some(task.await)
+                } else {
+                    None
+                }
+            } => {
+                send_task = None;
+                send_cmd_tx = None;
+
+                match send_result {
+                    Ok(Ok(result)) => {
+                        next_file_id = result.next_file_id;
+                        pending_cmds.extend(result.pending_cmds);
+
+                        match result.outcome {
+                            SendOutcome::Completed => {}
+                            SendOutcome::Canceled => {
+                                let _ = evt_tx
+                                    .send(NetEvent::Log("transferencia cancelada".to_string()));
+                            }
+                            SendOutcome::Shutdown => return Ok(()),
+                        }
+                    }
+                    Ok(Err(err)) => {
+                        let _ = evt_tx.send(NetEvent::Log(format!("erro no envio {err}")));
+                    }
+                    Err(err) => {
+                        let _ = evt_tx.send(NetEvent::Log(format!(
+                            "task de envio encerrada inesperadamente {err}",
+                        )));
                     }
                 }
             }
@@ -1050,9 +1204,9 @@ async fn handle_command(
     bind_addr: &mut SocketAddr,
     connected_peer: &mut Option<SocketAddr>,
     connection: &mut Option<quinn::Connection>,
-    next_file_id: &mut u64,
+    _next_file_id: &mut u64,
     evt_tx: &Sender<NetEvent>,
-    cmd_rx: &mut tokio_mpsc::UnboundedReceiver<NetCommand>,
+    _cmd_rx: &mut tokio_mpsc::UnboundedReceiver<NetCommand>,
     pending_cmds: &mut Vec<NetCommand>,
     endpoint: &mut Endpoint,
     _inbound_tx: &mut tokio_mpsc::UnboundedSender<InboundFrame>,
@@ -1144,31 +1298,10 @@ async fn handle_command(
             let _ = evt_tx.send(NetEvent::Log("cancelamento solicitado".to_string()));
         }
         NetCommand::SendFiles(files) => {
-            if let (Some(peer), Some(conn)) = (*connected_peer, connection) {
-                match send_files(
-                    conn,
-                    peer,
-                    &files,
-                    next_file_id,
-                    evt_tx,
-                    cmd_rx,
-                    pending_cmds,
-                    CHUNK_SIZE,
-                )
-                .await
-                {
-                    Ok(SendOutcome::Completed) => {}
-                    Ok(SendOutcome::Canceled) => {
-                        let _ = evt_tx.send(NetEvent::Log("transferencia cancelada".to_string()));
-                    }
-                    Ok(SendOutcome::Shutdown) => return Ok(true),
-                    Err(err) => {
-                        let _ = evt_tx.send(NetEvent::Log(format!("erro ao enviar {err}")));
-                    }
-                }
-            } else {
-                let _ = evt_tx.send(NetEvent::Log("parceiro nao definido".to_string()));
-            }
+            pending_cmds.push(NetCommand::SendFiles(files));
+            let _ = evt_tx.send(NetEvent::Log(
+                "envio de arquivos sera iniciado quando possivel".to_string(),
+            ));
         }
         NetCommand::Shutdown => return Ok(true),
     }
@@ -1675,8 +1808,8 @@ async fn read_frame(stream: &mut quinn::RecvStream) -> io::Result<Option<Vec<u8>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::stun::stun_server_list;
+    use super::*;
 
     #[test]
     fn stun_defaults_not_empty() {
