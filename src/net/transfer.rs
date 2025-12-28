@@ -33,6 +33,12 @@ pub(crate) enum SendOutcome {
     Shutdown,
 }
 
+pub(crate) struct SendResult {
+    pub outcome: SendOutcome,
+    pub next_file_id: u64,
+    pub pending_cmds: Vec<NetCommand>,
+}
+
 /// Processa mensagens recebidas pela rede, atualizando o estado e retornando
 /// `true` se um novo par foi identificado.
 pub(crate) async fn handle_incoming_message(
@@ -279,12 +285,12 @@ pub(crate) async fn send_files(
     connection: &quinn::Connection,
     _peer: SocketAddr,
     files: &[PathBuf],
-    next_file_id: &mut u64,
+    mut next_file_id: u64,
     evt_tx: &Sender<NetEvent>,
     cmd_rx: &mut tokio_mpsc::UnboundedReceiver<NetCommand>,
-    pending_cmds: &mut Vec<NetCommand>,
     chunk_size: usize,
-) -> io::Result<SendOutcome> {
+) -> io::Result<SendResult> {
+    let mut pending_cmds: Vec<NetCommand> = Vec::new();
     let _ = send_message(
         connection,
         &WireMessage::Hello {
@@ -295,9 +301,21 @@ pub(crate) async fn send_files(
     .await;
 
     for path in files {
-        match handle_send_control(cmd_rx, pending_cmds) {
-            SendOutcome::Canceled => return Ok(SendOutcome::Canceled),
-            SendOutcome::Shutdown => return Ok(SendOutcome::Shutdown),
+        match handle_send_control(cmd_rx, &mut pending_cmds) {
+            SendOutcome::Canceled => {
+                return Ok(SendResult {
+                    outcome: SendOutcome::Canceled,
+                    next_file_id,
+                    pending_cmds,
+                });
+            }
+            SendOutcome::Shutdown => {
+                return Ok(SendResult {
+                    outcome: SendOutcome::Shutdown,
+                    next_file_id,
+                    pending_cmds,
+                });
+            }
             SendOutcome::Completed => {}
         }
 
@@ -309,8 +327,8 @@ pub(crate) async fn send_files(
             .and_then(|value| value.to_str())
             .unwrap_or("file.bin")
             .to_string();
-        let file_id = *next_file_id;
-        *next_file_id += 1;
+        let file_id = next_file_id;
+        next_file_id = next_file_id.wrapping_add(1);
 
         let mut stream = match connection.open_uni().await {
             Ok(stream) => stream,
@@ -357,7 +375,7 @@ pub(crate) async fn send_files(
                 size,
             });
 
-            match handle_send_control(cmd_rx, pending_cmds) {
+            match handle_send_control(cmd_rx, &mut pending_cmds) {
                 SendOutcome::Canceled => {
                     let _ = stream.reset(VarInt::from_u32(0));
                     let _ =
@@ -366,13 +384,21 @@ pub(crate) async fn send_files(
                         file_id,
                         path: path.clone(),
                     });
-                    return Ok(SendOutcome::Canceled);
+                    return Ok(SendResult {
+                        outcome: SendOutcome::Canceled,
+                        next_file_id,
+                        pending_cmds,
+                    });
                 }
                 SendOutcome::Shutdown => {
                     let _ = stream.reset(VarInt::from_u32(0));
                     let _ =
                         send_message(connection, &WireMessage::Cancel { file_id }, evt_tx).await;
-                    return Ok(SendOutcome::Shutdown);
+                    return Ok(SendResult {
+                        outcome: SendOutcome::Shutdown,
+                        next_file_id,
+                        pending_cmds,
+                    });
                 }
                 SendOutcome::Completed => {}
             }
@@ -387,5 +413,9 @@ pub(crate) async fn send_files(
         }
     }
 
-    Ok(SendOutcome::Completed)
+    Ok(SendResult {
+        outcome: SendOutcome::Completed,
+        next_file_id,
+        pending_cmds,
+    })
 }
