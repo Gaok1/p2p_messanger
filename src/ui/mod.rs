@@ -205,6 +205,7 @@ impl Theme {
 pub struct AppState {
     bind_addr: SocketAddr,
     peer_addr: Option<SocketAddr>,
+    peer_label: Option<String>,
     peer_input: String,
     peer_focus: bool,
     mode: IpMode,
@@ -232,7 +233,11 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(bind_addr: SocketAddr, peer_addr: Option<SocketAddr>) -> Self {
+    pub fn new(
+        bind_addr: SocketAddr,
+        peer_addr: Option<SocketAddr>,
+        peer_label: Option<String>,
+    ) -> Self {
         let (peer_addr, peer_input, connect_status) = match peer_addr {
             Some(addr) => (None, addr.to_string(), ConnectStatus::Connecting(addr)),
             None => (None, String::new(), ConnectStatus::Idle),
@@ -247,6 +252,7 @@ impl AppState {
         Self {
             bind_addr,
             peer_addr,
+            peer_label,
             peer_input,
             peer_focus: false,
             mode,
@@ -822,11 +828,13 @@ fn handle_peer_input_key(
         }
         KeyCode::Backspace => {
             app.peer_input.pop();
+            app.peer_label = None;
         }
         KeyCode::Char(c) => {
             if c.is_ascii() && app.peer_input.len() < MAX_PEER_INPUT {
                 app.peer_input.push(c);
             }
+            app.peer_label = None;
         }
         _ => {}
     }
@@ -891,6 +899,7 @@ fn paste_peer_ip(app: &mut AppState) {
                 app.push_log("clipboard vazio");
             } else {
                 app.peer_input = filtered;
+                app.peer_label = None;
                 app.peer_focus = true;
                 app.push_log("ip colado");
             }
@@ -1767,10 +1776,21 @@ fn render_connection_panel(
     frame.render_widget(copy_public_widget, copy_public_button.area);
 
     // Status (chips)
-    let peer_text = app
-        .peer_addr
-        .map(|addr| addr.to_string())
-        .unwrap_or_else(|| "none".to_string());
+    let peer_text = if let Some(label) = &app.peer_label {
+        match app.peer_addr {
+            Some(addr) => format!("{label} ({addr})"),
+            None if !app.peer_input.trim().is_empty() => {
+                format!("{label} ({})", app.peer_input.trim())
+            }
+            None => label.clone(),
+        }
+    } else if let Some(addr) = app.peer_addr {
+        addr.to_string()
+    } else if !app.peer_input.trim().is_empty() {
+        app.peer_input.trim().to_string()
+    } else {
+        "none".to_string()
+    };
 
     let st = status_color(theme, &app.connect_status);
 
