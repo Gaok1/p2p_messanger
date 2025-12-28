@@ -28,6 +28,7 @@ pub(crate) const PROTOCOL_VERSION: u8 = 3;
 pub(crate) const OBSERVED_ENDPOINT_VERSION: u8 = 2;
 pub(crate) const HEARTBEAT_VERSION: u8 = 3;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const MOBILITY_TIMER_PARK: Duration = Duration::from_secs(3600);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 const HEARTBEAT_MAX_MISSES: u32 = 3;
@@ -341,6 +342,7 @@ fn spawn_send_task(
 /// Comandos enviados pela UI para a thread de rede.
 pub enum NetCommand {
     ConnectPeer(SocketAddr),
+    ProbePeer(SocketAddr),
     Rebind(SocketAddr),
     CancelTransfers,
     SendFiles(Vec<PathBuf>),
@@ -352,6 +354,11 @@ pub enum NetEvent {
     Log(String),
     Bound(SocketAddr),
     PublicEndpoint(SocketAddr),
+    ProbeFinished {
+        peer: SocketAddr,
+        ok: bool,
+        message: String,
+    },
     FileSent {
         file_id: u64,
         path: PathBuf,
@@ -1293,6 +1300,44 @@ async fn handle_command(
                 });
             });
         }
+        NetCommand::ProbePeer(peer) => {
+            let evt_tx = evt_tx.clone();
+            if endpoint
+                .local_addr()
+                .ok()
+                .is_some_and(|local| local.is_ipv4() != peer.is_ipv4())
+            {
+                let _ = evt_tx.send(NetEvent::ProbeFinished {
+                    peer,
+                    ok: false,
+                    message: "familia IP diferente do bind atual".to_string(),
+                });
+            } else {
+                let endpoint = endpoint.clone();
+                tokio::spawn(async move {
+                    let result = quick_probe_peer(&endpoint, peer).await;
+                    match result {
+                        Ok(duration) => {
+                            let _ = evt_tx.send(NetEvent::ProbeFinished {
+                                peer,
+                                ok: true,
+                                message: format!(
+                                    "respondeu em {} ms (teste UDP/TLS)",
+                                    duration.as_millis()
+                                ),
+                            });
+                        }
+                        Err(err) => {
+                            let _ = evt_tx.send(NetEvent::ProbeFinished {
+                                peer,
+                                ok: false,
+                                message: err,
+                            });
+                        }
+                    }
+                });
+            }
+        }
         NetCommand::Rebind(_) => {}
         NetCommand::CancelTransfers => {
             let _ = evt_tx.send(NetEvent::Log("cancelamento solicitado".to_string()));
@@ -1715,6 +1760,26 @@ async fn connect_peer(
             let _ = evt_tx.send(NetEvent::Log(format!("erro ao iniciar conexao {err}")));
             None
         }
+    }
+}
+
+async fn quick_probe_peer(endpoint: &Endpoint, peer: SocketAddr) -> Result<Duration, String> {
+    let started = Instant::now();
+    let connecting = endpoint
+        .connect(peer, "pasta")
+        .map_err(|err| format!("erro ao iniciar teste {err}"))?;
+
+    match tokio::time::timeout(PROBE_TIMEOUT, connecting).await {
+        Ok(Ok(connection)) => {
+            let elapsed = started.elapsed();
+            connection.close(0u32.into(), b"probe");
+            Ok(elapsed)
+        }
+        Ok(Err(err)) => Err(format!("erro ao conectar: {err}")),
+        Err(_) => Err(format!(
+            "sem resposta em {}s (firewall/NAT?)",
+            PROBE_TIMEOUT.as_secs()
+        )),
     }
 }
 

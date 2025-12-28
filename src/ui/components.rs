@@ -23,6 +23,7 @@ pub struct ReceivedClickTarget {
 #[derive(Clone, Copy)]
 pub enum ButtonAction {
     ConnectPeer,
+    ProbePeer,
     SelectIpv4,
     SelectIpv6,
     ToggleMouseMode,

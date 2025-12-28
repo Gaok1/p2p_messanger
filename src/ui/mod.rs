@@ -107,6 +107,13 @@ impl ConnectStatus {
 }
 
 #[derive(Clone)]
+struct ProbeStatus {
+    peer: SocketAddr,
+    message: String,
+    ok: Option<bool>,
+}
+
+#[derive(Clone)]
 struct OutgoingEntry {
     path: PathBuf,
     file_id: Option<u64>,
@@ -202,6 +209,7 @@ pub struct AppState {
     peer_focus: bool,
     mode: IpMode,
     connect_status: ConnectStatus,
+    probe_status: Option<ProbeStatus>,
     local_ip: LocalIps,
     public_endpoint: Option<SocketAddr>,
     stun_status: Option<String>,
@@ -243,6 +251,7 @@ impl AppState {
             peer_focus: false,
             mode,
             connect_status,
+            probe_status: None,
             local_ip,
             public_endpoint: None,
             stun_status: None,
@@ -466,12 +475,22 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 .fallback(app.local_ip.has_v4(), app.local_ip.has_v6());
             app.public_endpoint = None;
             app.stun_status = Some("stun...".to_string());
+            app.probe_status = None;
             app.needs_clear = true;
         }
         NetEvent::PublicEndpoint(endpoint) => {
             app.public_endpoint = Some(endpoint);
             app.stun_status = None;
             app.push_log(format!("endpoint publico {endpoint}"));
+        }
+        NetEvent::ProbeFinished { peer, ok, message } => {
+            app.probe_status = Some(ProbeStatus {
+                peer,
+                message: message.clone(),
+                ok: Some(ok),
+            });
+            let status = if ok { "teste ok" } else { "teste falhou" };
+            app.push_log(format!("{status} {peer}: {message}"));
         }
         NetEvent::FileSent { file_id, path } => {
             if let Some(entry) = app
@@ -700,6 +719,7 @@ fn handle_button_action(
 ) {
     match action {
         ButtonAction::ConnectPeer => start_connect(app, net_tx),
+        ButtonAction::ProbePeer => start_probe(app, net_tx),
         ButtonAction::SelectIpv4 => handle_mode_change(app, IpMode::Ipv4, net_tx),
         ButtonAction::SelectIpv6 => handle_mode_change(app, IpMode::Ipv6, net_tx),
         ButtonAction::ToggleMouseMode => {
@@ -879,6 +899,24 @@ fn paste_peer_ip(app: &mut AppState) {
     }
 }
 
+fn start_probe(app: &mut AppState, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
+    match parse_peer_addr(&app.peer_input) {
+        Some(addr) => {
+            app.probe_status = Some(ProbeStatus {
+                peer: addr,
+                message: "testando conectividade...".to_string(),
+                ok: None,
+            });
+            if let Err(err) = net_tx.send(NetCommand::ProbePeer(addr)) {
+                app.push_log(format!("erro ao testar conexao {err}"));
+            } else {
+                app.push_log(format!("teste rapido iniciado para {addr}"));
+            }
+        }
+        None => app.push_log("endereco do parceiro invalido"),
+    }
+}
+
 fn start_connect(app: &mut AppState, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
     match parse_peer_addr(&app.peer_input) {
         Some(addr) => {
@@ -913,6 +951,39 @@ fn status_color(theme: Theme, status: &ConnectStatus) -> Color {
         ConnectStatus::Connected(_) => theme.ok,
         ConnectStatus::Disconnected(_) => theme.warn,
         ConnectStatus::Timeout(_) => theme.warn,
+    }
+}
+
+fn nat_tip_text(app: &AppState) -> String {
+    let port = app.bind_addr.port();
+    match (app.public_endpoint, app.stun_status.as_deref()) {
+        (Some(endpoint), _) => {
+            if endpoint.port() == port {
+                format!("porta {port} aparente ({endpoint}); compartilhe esse endpoint")
+            } else {
+                format!(
+                    "porta local {port} mapeada como {endpoint}; considere redirecionar a mesma porta"
+                )
+            }
+        }
+        (None, Some(status)) => {
+            format!("STUN: {status}; encaminhe UDP {port} ou libere firewall")
+        }
+        (None, None) => format!("aguardando STUN; abra/encaminhe UDP {port} se precisar"),
+    }
+}
+
+fn probe_summary(app: &AppState) -> String {
+    match &app.probe_status {
+        Some(status) => {
+            let prefix = match status.ok {
+                Some(true) => "teste OK",
+                Some(false) => "teste falhou",
+                None => "testando",
+            };
+            format!("{prefix} {} ({})", status.peer, status.message)
+        }
+        None => "sem teste rapido (use o botao Testar)".to_string(),
     }
 }
 
@@ -1314,7 +1385,7 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(16), // header/connection (com alternador IPv4/IPv6)
+            Constraint::Length(20), // header/connection (com alternador IPv4/IPv6)
             Constraint::Min(6),     // lists
             Constraint::Length(3),  // buttons
         ])
@@ -1404,6 +1475,7 @@ fn render_connection_panel(
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
+            Constraint::Length(4),
         ])
         .split(area);
 
@@ -1481,13 +1553,14 @@ fn render_connection_panel(
     frame.render_widget(ipv6_widget, ipv6_button.area);
     frame.render_widget(mouse_mode_widget, mouse_mode_button.area);
 
-    // Linha 2: input + colar + conectar
+    // Linha 2: input + colar + conectar + testar
     let row_top = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(20),
+            Constraint::Length(10),
             Constraint::Length(12),
-            Constraint::Length(14),
+            Constraint::Length(12),
         ])
         .split(rows[1]);
 
@@ -1594,6 +1667,26 @@ fn render_connection_panel(
 
     frame.render_widget(connect_widget, connect_button.area);
 
+    // Testar conexao rapida
+    let probe_button = Button {
+        label: "Testar".to_string(),
+        area: row_top[3],
+        action: ButtonAction::ProbePeer,
+    };
+
+    let probe_hover = hover
+        .map(|(x, y)| point_in_rect(x, y, probe_button.area))
+        .unwrap_or(false);
+    let probe_enabled = !app.peer_input.trim().is_empty();
+    let probe_style = button_style(theme, theme.info, probe_hover, probe_enabled);
+
+    let probe_widget = Paragraph::new(probe_button.label.as_str())
+        .alignment(Alignment::Center)
+        .style(probe_style)
+        .block(subtle_block(theme));
+
+    frame.render_widget(probe_widget, probe_button.area);
+
     // Meu IP
     let local_text = app
         .current_local_ip()
@@ -1694,11 +1787,54 @@ fn render_connection_panel(
     let status = Paragraph::new(status_line).block(block_with_title(theme, "status"));
     frame.render_widget(status, row_status);
 
+    let row_assist = rows[5];
+    let detected_v4 = app
+        .local_ip
+        .v4
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "nenhum".to_string());
+    let detected_v6 = app
+        .local_ip
+        .v6
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "nenhum".to_string());
+    let detected_line = Line::from(vec![
+        Span::styled("IPs: ", Style::default().fg(theme.muted)),
+        Span::styled(format!("v4 {detected_v4}"), Style::default().fg(theme.text)),
+        Span::raw(" "),
+        Span::styled("•", Style::default().fg(theme.muted)),
+        Span::raw(" "),
+        Span::styled(format!("v6 {detected_v6}"), Style::default().fg(theme.text)),
+        Span::raw(" "),
+        Span::styled("•", Style::default().fg(theme.muted)),
+        Span::raw(" "),
+        Span::styled(
+            format!("porta UDP {}", app.bind_addr.port()),
+            Style::default().fg(theme.muted),
+        ),
+    ]);
+
+    let assist_line = Line::from(vec![
+        Span::styled("Ajuda: ", Style::default().fg(theme.muted)),
+        Span::styled(nat_tip_text(app), Style::default().fg(theme.text)),
+        Span::raw(" "),
+        Span::styled("•", Style::default().fg(theme.muted)),
+        Span::raw(" "),
+        Span::styled(probe_summary(app), Style::default().fg(theme.text)),
+    ]);
+
+    let assistant = Paragraph::new(vec![detected_line, assist_line])
+        .block(block_with_title(theme, "assistente de rede"))
+        .style(Style::default().bg(theme.panel));
+
+    frame.render_widget(assistant, row_assist);
+
     let buttons = vec![
         ipv4_button,
         ipv6_button,
         mouse_mode_button,
         connect_button,
+        probe_button,
         paste_button,
         copy_button,
         copy_public_button,
