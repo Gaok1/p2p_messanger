@@ -119,6 +119,9 @@ struct OutgoingEntry {
     file_id: Option<u64>,
     size: Option<u64>,
     sent_bytes: u64,
+    rate_mbps: f64,
+    rate_last_at: Option<Instant>,
+    rate_last_bytes: u64,
     status: OutgoingStatus,
 }
 
@@ -508,6 +511,8 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 if let Some(size) = entry.size {
                     entry.sent_bytes = size;
                 }
+                entry.rate_mbps = 0.0;
+                entry.rate_last_at = None;
             }
             app.push_log(format!("enviado {}", path.display()));
         }
@@ -536,6 +541,9 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 entry.file_id = Some(file_id);
                 entry.size = Some(size);
                 entry.sent_bytes = 0;
+                entry.rate_mbps = 0.0;
+                entry.rate_last_at = Some(Instant::now());
+                entry.rate_last_bytes = 0;
                 entry.status = OutgoingStatus::Sending;
             }
         }
@@ -550,7 +558,22 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 .find(|entry| entry.file_id == Some(file_id))
             {
                 entry.size = Some(size);
-                entry.sent_bytes = bytes_sent.min(size);
+                let now = Instant::now();
+                let new_bytes = bytes_sent.min(size);
+                if let Some(last_at) = entry.rate_last_at {
+                    let dt = now.duration_since(last_at);
+                    if dt >= Duration::from_millis(250) {
+                        let delta = new_bytes.saturating_sub(entry.rate_last_bytes);
+                        let dt_s = dt.as_secs_f64().max(0.001);
+                        entry.rate_mbps = (delta as f64 * 8.0) / dt_s / 1_000_000.0;
+                        entry.rate_last_at = Some(now);
+                        entry.rate_last_bytes = new_bytes;
+                    }
+                } else {
+                    entry.rate_last_at = Some(now);
+                    entry.rate_last_bytes = new_bytes;
+                }
+                entry.sent_bytes = new_bytes;
                 if matches!(entry.status, OutgoingStatus::Pending) {
                     entry.status = OutgoingStatus::Sending;
                 }
@@ -563,6 +586,8 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 .find(|entry| entry.file_id == Some(file_id) || entry.path == path)
             {
                 entry.status = OutgoingStatus::Canceled;
+                entry.rate_mbps = 0.0;
+                entry.rate_last_at = None;
             }
             app.push_log(format!("cancelado {}", path.display()));
         }
@@ -621,6 +646,8 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 .find(|entry| entry.file_id == file_id)
             {
                 entry.status = IncomingStatus::Canceled;
+                entry.rate_mbps = 0.0;
+                entry.rate_last_at = None;
             }
             app.push_log(format!("recebimento cancelado {}", path.display()));
         }
@@ -742,6 +769,9 @@ fn handle_button_action(
                         file_id: None,
                         size: None,
                         sent_bytes: 0,
+                        rate_mbps: 0.0,
+                        rate_last_at: None,
+                        rate_last_bytes: 0,
                         status: OutgoingStatus::Pending,
                     });
                 }
@@ -1142,6 +1172,34 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+fn format_eta(remaining_bytes: u64, rate_mbps: f64) -> Option<String> {
+    if rate_mbps <= 0.0 {
+        return None;
+    }
+    let rate_bps = rate_mbps * 1_000_000.0 / 8.0;
+    if rate_bps <= 0.0 {
+        return None;
+    }
+    let seconds = (remaining_bytes as f64) / rate_bps;
+    if !seconds.is_finite() {
+        return None;
+    }
+
+    let total_secs = seconds.ceil() as u64;
+    let duration = Duration::from_secs(total_secs);
+    let hours = duration.as_secs() / 3600;
+    let minutes = (duration.as_secs() % 3600) / 60;
+    let seconds = duration.as_secs() % 60;
+
+    let text = if hours > 0 {
+        format!("{hours:02}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    };
+
+    Some(text)
+}
+
 fn progress_bar(bytes: u64, size: u64, width: usize) -> (String, u64) {
     if size == 0 {
         return (format!("[{}]", "░".repeat(width)), 0);
@@ -1156,6 +1214,26 @@ fn progress_bar(bytes: u64, size: u64, width: usize) -> (String, u64) {
         "░".repeat(width.saturating_sub(filled))
     );
     (bar, percent)
+}
+
+fn progress_details(current: u64, size: u64, percent: u64, rate_mbps: f64) -> String {
+    let safe_current = current.min(size);
+    let mut parts = vec![format!(
+        "{} / {} ({}%)",
+        format_bytes(safe_current),
+        format_bytes(size),
+        percent
+    )];
+
+    if rate_mbps > 0.0 {
+        parts.push(format!("{rate_mbps:.1} Mbps"));
+    }
+
+    if let Some(eta) = format_eta(size.saturating_sub(safe_current), rate_mbps) {
+        parts.push(format!("ETA {eta}"));
+    }
+
+    format!(" {} ", parts.join(" · "))
 }
 
 fn render_outgoing_item(theme: Theme, entry: &OutgoingEntry) -> ListItem<'static> {
@@ -1174,12 +1252,7 @@ fn render_outgoing_item(theme: Theme, entry: &OutgoingEntry) -> ListItem<'static
     if let Some(size) = entry.size {
         let (bar, percent) = progress_bar(entry.sent_bytes, size, PROGRESS_BAR_WIDTH);
         let bar_span = Span::styled(bar, Style::default().fg(sc));
-        let info = format!(
-            " {} / {} ({}%) ",
-            format_bytes(entry.sent_bytes.min(size)),
-            format_bytes(size),
-            percent
-        );
+        let info = progress_details(entry.sent_bytes, size, percent, entry.rate_mbps);
         let info_span = Span::styled(info, Style::default().fg(theme.muted));
         ListItem::new(Line::from(vec![status, bar_span, info_span, path]))
     } else {
@@ -1330,12 +1403,7 @@ fn render_incoming_action_line(
     let bar_len = bar.chars().count();
     let bar_span = Span::styled(bar, Style::default().fg(sc));
 
-    let info_text = format!(
-        " {} / {} ({}%)",
-        format_bytes(entry.received_bytes.min(entry.size)),
-        format_bytes(entry.size),
-        percent
-    );
+    let info_text = progress_details(entry.received_bytes, entry.size, percent, entry.rate_mbps);
     let info_len = info_text.chars().count();
     let info_span = Span::styled(info_text, Style::default().fg(theme.muted));
 
