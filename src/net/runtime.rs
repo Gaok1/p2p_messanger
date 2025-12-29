@@ -1507,6 +1507,7 @@ async fn read_frame(stream: &mut quinn::RecvStream) -> io::Result<Option<Vec<u8>
 mod tests {
     use super::stun::stun_server_list;
     use super::*;
+    use crate::net::serialize_message;
 
     #[test]
     fn stun_defaults_not_empty() {

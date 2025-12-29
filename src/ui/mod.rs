@@ -82,22 +82,69 @@ pub fn run_app(
                         handle_peer_input_key(app, key.code, &net_tx);
                     } else if app.log_search_focus {
                         handle_log_search_key(app, key.code);
+                    } else if app.history_search_focus {
+                        handle_history_search_key(app, key.code);
                     } else {
                         match key.code {
-                            KeyCode::Up => app.scroll_logs_up(1),
-                            KeyCode::Down => app.scroll_logs_down(1),
-                            KeyCode::PageUp => app.scroll_logs_up(app.logs_view_height.max(1)),
-                            KeyCode::PageDown => app.scroll_logs_down(app.logs_view_height.max(1)),
-                            KeyCode::Home => app.scroll_logs_top(),
-                            KeyCode::End => app.scroll_logs_bottom(),
+                            KeyCode::Up => match app.active_tab {
+                                ActiveTab::Downloads => app.scroll_history_up(1),
+                                _ => app.scroll_logs_up(1),
+                            },
+                            KeyCode::Down => match app.active_tab {
+                                ActiveTab::Downloads => app.scroll_history_down(1),
+                                _ => app.scroll_logs_down(1),
+                            },
+                            KeyCode::PageUp => match app.active_tab {
+                                ActiveTab::Downloads => {
+                                    app.scroll_history_up(app.history_view_height.max(1))
+                                }
+                                _ => app.scroll_logs_up(app.logs_view_height.max(1)),
+                            },
+                            KeyCode::PageDown => match app.active_tab {
+                                ActiveTab::Downloads => {
+                                    app.scroll_history_down(app.history_view_height.max(1))
+                                }
+                                _ => app.scroll_logs_down(app.logs_view_height.max(1)),
+                            },
+                            KeyCode::Home => match app.active_tab {
+                                ActiveTab::Downloads => app.history_scroll = 0,
+                                _ => app.scroll_logs_top(),
+                            },
+                            KeyCode::End => match app.active_tab {
+                                ActiveTab::Downloads => {
+                                    app.history_scroll = app.max_history_scroll()
+                                }
+                                _ => app.scroll_logs_bottom(),
+                            },
                             KeyCode::Char('/') => {
                                 app.peer_focus = false;
-                                app.log_search_focus = true;
+                                app.log_search_focus = false;
+                                app.history_search_focus = false;
+                                if matches!(app.active_tab, ActiveTab::Downloads) {
+                                    app.history_search_focus = true;
+                                } else {
+                                    app.log_search_focus = true;
+                                }
                             }
-                            KeyCode::Char('f') => app.cycle_log_filter(),
+                            KeyCode::Char('f') => {
+                                if matches!(app.active_tab, ActiveTab::Downloads) {
+                                    app.cycle_history_filter();
+                                } else {
+                                    app.cycle_log_filter();
+                                }
+                            }
                             KeyCode::Char('m') => {
                                 app.mouse_capture_request = Some(!app.mouse_capture_enabled);
                             }
+                            KeyCode::Char('r')
+                                if matches!(app.active_tab, ActiveTab::Downloads) =>
+                            {
+                                app.refresh_history();
+                            }
+                            KeyCode::Char('1') => app.active_tab = ActiveTab::Transfers,
+                            KeyCode::Char('2') => app.active_tab = ActiveTab::Downloads,
+                            KeyCode::Char('3') => app.active_tab = ActiveTab::Events,
+                            KeyCode::Tab => app.active_tab = app.active_tab.next(),
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             _ => {}
                         }
@@ -207,6 +254,7 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 entry.rate_started_at = None;
             }
             app.push_log(format!("recebido {}", path.display()));
+            app.push_history_entry(path);
         }
         NetEvent::SessionDir(path) => {
             app.push_log(format!("diretorio da sessao {}", path.display()));
@@ -386,12 +434,20 @@ fn handle_mouse_event(
             app.last_mouse = Some(position);
         }
         MouseEventKind::ScrollUp => {
-            if point_in_rect(mouse.column, mouse.row, app.logs_area) {
+            if matches!(app.active_tab, ActiveTab::Downloads)
+                && point_in_rect(mouse.column, mouse.row, app.history_area)
+            {
+                app.scroll_history_up(3);
+            } else if point_in_rect(mouse.column, mouse.row, app.logs_area) {
                 app.scroll_logs_up(3);
             }
         }
         MouseEventKind::ScrollDown => {
-            if point_in_rect(mouse.column, mouse.row, app.logs_area) {
+            if matches!(app.active_tab, ActiveTab::Downloads)
+                && point_in_rect(mouse.column, mouse.row, app.history_area)
+            {
+                app.scroll_history_down(3);
+            } else if point_in_rect(mouse.column, mouse.row, app.logs_area) {
                 app.scroll_logs_down(3);
             }
         }
@@ -588,6 +644,35 @@ fn handle_log_search_key(app: &mut AppState, key: KeyCode) {
         KeyCode::PageDown => app.scroll_logs_down(app.logs_view_height.max(1)),
         KeyCode::Home => app.scroll_logs_top(),
         KeyCode::End => app.scroll_logs_bottom(),
+        _ => {}
+    }
+}
+
+fn handle_history_search_key(app: &mut AppState, key: KeyCode) {
+    match key {
+        KeyCode::Esc | KeyCode::Enter => {
+            app.history_search_focus = false;
+        }
+        KeyCode::Backspace => {
+            if !app.history_query.is_empty() {
+                let mut query = app.history_query.clone();
+                query.pop();
+                app.set_history_query(query);
+            }
+        }
+        KeyCode::Char(c) => {
+            if app.history_query.len() < MAX_LOG_QUERY {
+                let mut query = app.history_query.clone();
+                query.push(c);
+                app.set_history_query(query);
+            }
+        }
+        KeyCode::Up => app.scroll_history_up(1),
+        KeyCode::Down => app.scroll_history_down(1),
+        KeyCode::PageUp => app.scroll_history_up(app.history_view_height.max(1)),
+        KeyCode::PageDown => app.scroll_history_down(app.history_view_height.max(1)),
+        KeyCode::Home => app.history_scroll = 0,
+        KeyCode::End => app.history_scroll = app.max_history_scroll(),
         _ => {}
     }
 }
@@ -965,6 +1050,38 @@ fn progress_details(current: u64, size: u64, percent: u64, rate_mbps: f64) -> St
     format!(" {} ", parts.join(" · "))
 }
 
+fn format_size(size: u64) -> String {
+    if size == 0 {
+        return "0 B".to_string();
+    }
+
+    let units = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = size as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < units.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", units[unit])
+}
+
+fn format_modified(modified: Option<std::time::SystemTime>) -> String {
+    if let Some(time) = modified {
+        if let Ok(duration) = time.elapsed() {
+            let hours = duration.as_secs() / 3600;
+            if hours < 1 {
+                return "agora mesmo".to_string();
+            }
+            if hours < 24 {
+                return format!("há {}h", hours);
+            }
+            let days = hours / 24;
+            return format!("há {}d", days);
+        }
+    }
+    "tempo desconhecido".to_string()
+}
+
 fn render_outgoing_item(theme: Theme, entry: &OutgoingEntry) -> ListItem<'static> {
     let sc = outgoing_status_color(theme, entry.status);
 
@@ -1188,23 +1305,142 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     // "pinta" o fundo inteiro (evita ficar com blocos soltos)
     frame.render_widget(root_bg(theme), frame.size());
 
-    let chunks = Layout::default()
+    let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(20), // header/connection (com alternador IPv4/IPv6)
-            Constraint::Min(6),     // lists
-            Constraint::Length(3),  // buttons
+            Constraint::Length(24), // header + destaque
+            Constraint::Length(3),  // tabs
+            Constraint::Min(12),    // content
+            Constraint::Length(4),  // buttons
         ])
         .split(frame.size());
 
+    let header_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(20), Constraint::Length(4)])
+        .split(outer[0]);
+
     let (peer_input_area, mut header_buttons) =
-        render_connection_panel(frame, chunks[0], app, app.last_mouse, theme);
+        render_connection_panel(frame, header_chunks[0], app, app.last_mouse, theme);
     app.peer_input_area = peer_input_area;
 
+    render_status_overview(frame, header_chunks[1], app, theme);
+    render_tab_bar(frame, outer[1], app, theme);
+
+    match app.active_tab {
+        ActiveTab::Transfers => render_transfer_tab(frame, outer[2], app, theme),
+        ActiveTab::Downloads => render_downloads_tab(frame, outer[2], app, theme),
+        ActiveTab::Events => render_events_tab(frame, outer[2], app, theme),
+    }
+
+    let mut buttons = Vec::new();
+    buttons.append(&mut header_buttons);
+    buttons.extend(render_buttons(frame, outer[3], app, theme));
+    app.buttons = buttons;
+}
+
+fn render_status_overview(frame: &mut Frame, area: Rect, app: &AppState, theme: Theme) {
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+        ])
+        .split(area);
+
+    let connect = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("Vínculo ", Style::default().fg(theme.muted)),
+            chip(theme, app.mode_label(), theme.accent),
+        ]),
+        Line::from(vec![Span::styled(
+            app.connect_status.label(),
+            Style::default()
+                .fg(status_color(theme, &app.connect_status))
+                .add_modifier(Modifier::BOLD),
+        )]),
+    ])
+    .block(block_with_title(theme, "Conexão"))
+    .alignment(Alignment::Center)
+    .style(Style::default().bg(theme.panel));
+
+    let nat = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("Portas ", Style::default().fg(theme.muted)),
+            Span::styled(app.bind_addr.port().to_string(), title_style(theme)),
+        ]),
+        Line::from(vec![Span::styled(
+            nat_tip_text(app),
+            Style::default().fg(theme.text),
+        )]),
+    ])
+    .block(block_with_title(theme, "Rede / NAT"))
+    .style(Style::default().bg(theme.panel));
+
+    let probe = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("Autodiagnóstico ", Style::default().fg(theme.muted)),
+            chip(theme, "F", theme.info),
+            Span::raw("  (r para atualizar histórico)"),
+        ]),
+        Line::from(vec![Span::styled(
+            probe_summary(app),
+            Style::default().fg(theme.text),
+        )]),
+    ])
+    .block(block_with_title(theme, "Saúde do nó"))
+    .style(Style::default().bg(theme.panel));
+
+    frame.render_widget(connect, columns[0]);
+    frame.render_widget(nat, columns[1]);
+    frame.render_widget(probe, columns[2]);
+}
+
+fn render_tab_bar(frame: &mut Frame, area: Rect, app: &AppState, theme: Theme) {
+    let tabs = [
+        ("1 Transferências", ActiveTab::Transfers),
+        ("2 Downloads", ActiveTab::Downloads),
+        ("3 Eventos", ActiveTab::Events),
+    ];
+
+    let sections = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+        ])
+        .split(area);
+
+    for ((label, tab), chunk) in tabs.into_iter().zip(sections.iter()) {
+        let active = app.active_tab == tab;
+        let style = if active {
+            Style::default()
+                .fg(theme.bg)
+                .bg(theme.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.text).bg(theme.panel)
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme.border))
+            .style(Style::default().bg(theme.panel));
+        let tab_widget = Paragraph::new(label)
+            .alignment(Alignment::Center)
+            .style(style)
+            .block(block);
+        frame.render_widget(tab_widget, *chunk);
+    }
+}
+
+fn render_transfer_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme: Theme) {
     let body = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
-        .split(chunks[1]);
+        .split(area);
 
     let selected_items = app
         .selected
@@ -1223,7 +1459,7 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
         .split(body[1]);
 
-    let max_entries = max_received_entries_for_area(right[0]).min(20);
+    let max_entries = max_received_entries_for_area(right[0]).min(24);
     let received_view = build_received_view(&app.received, max_entries);
     let mut received_items = Vec::new();
     for (entry_idx, entry) in received_view.iter().enumerate() {
@@ -1265,8 +1501,7 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
             app.log_filter.label(),
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
-        Span::raw("   "),
-        Span::styled("Busca (/): ", Style::default().fg(theme.muted)),
+        Span::styled("  Busca (/): ", Style::default().fg(theme.muted)),
         Span::styled(query_text, Style::default().fg(query_color)),
     ]);
 
@@ -1294,11 +1529,181 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         .style(Style::default().bg(theme.panel));
 
     frame.render_widget(logs, logs_chunks[1]);
+}
 
-    let mut buttons = Vec::new();
-    buttons.append(&mut header_buttons);
-    buttons.extend(render_buttons(frame, chunks[2], app, theme));
-    app.buttons = buttons;
+fn render_events_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme: Theme) {
+    let layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+        .split(area);
+
+    let summary = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("Peer: ", Style::default().fg(theme.muted)),
+            Span::styled(
+                app.peer_label
+                    .clone()
+                    .unwrap_or_else(|| "sem apelido".to_string()),
+                title_style(theme),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Status: ", Style::default().fg(theme.muted)),
+            Span::styled(
+                app.connect_status.label(),
+                Style::default().fg(status_color(theme, &app.connect_status)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Diagnóstico: ", Style::default().fg(theme.muted)),
+            Span::styled(probe_summary(app), Style::default().fg(theme.text)),
+        ]),
+    ])
+    .block(block_with_title(theme, "Contexto da sessão"))
+    .style(Style::default().bg(theme.panel));
+
+    frame.render_widget(summary, layout[0]);
+
+    let log_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(layout[1]);
+
+    let query_text = if app.log_query.is_empty() {
+        "(todas)".to_string()
+    } else {
+        app.log_query.clone()
+    };
+    let query_color = if app.log_search_focus {
+        theme.accent
+    } else {
+        theme.text
+    };
+    let filter_line = Line::from(vec![
+        Span::styled("Filtro (F): ", Style::default().fg(theme.muted)),
+        Span::styled(
+            app.log_filter.label(),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  Busca (/): ", Style::default().fg(theme.muted)),
+        Span::styled(query_text, Style::default().fg(query_color)),
+    ]);
+
+    let logs_filter = Paragraph::new(filter_line).style(Style::default().bg(theme.panel));
+    frame.render_widget(logs_filter, log_layout[0]);
+
+    app.logs_area = log_layout[1];
+    app.set_logs_view_height(log_layout[1].height.saturating_sub(2) as usize);
+
+    let visible_logs = app.visible_logs();
+    let start = app.logs_scroll.min(app.max_logs_scroll());
+    let end = (start + app.logs_view_height).min(visible_logs.len());
+    let log_items = visible_logs[start..end]
+        .iter()
+        .map(|entry| {
+            ListItem::new(Span::styled(
+                format_log_line(entry.level, &entry.message),
+                log_style(theme, entry),
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    let logs = List::new(log_items)
+        .block(block_with_title(theme, "cronologia"))
+        .style(Style::default().bg(theme.panel));
+
+    frame.render_widget(logs, log_layout[1]);
+}
+
+fn render_downloads_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme: Theme) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(6),
+        ])
+        .split(area);
+
+    app.logs_area = Rect::default();
+    app.set_logs_view_height(0);
+
+    let search_line = Line::from(vec![
+        Span::styled("Buscar (/): ", Style::default().fg(theme.muted)),
+        Span::styled(
+            if app.history_query.is_empty() {
+                "(todos)".to_string()
+            } else {
+                app.history_query.clone()
+            },
+            Style::default()
+                .fg(if app.history_search_focus {
+                    theme.accent
+                } else {
+                    theme.text
+                })
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  Filtro (F): ", Style::default().fg(theme.muted)),
+        Span::styled(app.history_filter.label(), title_style(theme)),
+        Span::styled("  Atualizar (R)", Style::default().fg(theme.muted)),
+    ]);
+
+    let search = Paragraph::new(search_line)
+        .block(block_with_title(theme, "histórico de downloads"))
+        .style(Style::default().bg(theme.panel));
+    frame.render_widget(search, layout[0]);
+
+    let status_text = app
+        .history_status
+        .clone()
+        .unwrap_or_else(|| format!("{} itens registrados", app.history_entries.len()));
+    let status = Paragraph::new(status_text)
+        .block(subtle_block(theme))
+        .style(Style::default().fg(theme.muted).bg(theme.panel));
+    frame.render_widget(status, layout[1]);
+
+    let list_area = layout[2];
+    app.history_area = list_area;
+    let inner = inner_block_area(list_area);
+    let item_height = 2_usize;
+    app.set_history_view_height((inner.height as usize / item_height).max(1));
+
+    let entries = app.filtered_history();
+    let start = app.history_scroll.min(app.max_history_scroll());
+    let end = (start + app.history_view_height).min(entries.len());
+    let window = &entries[start..end];
+
+    let mut items = Vec::new();
+    for entry in window {
+        let subtitle = format!(
+            "{}  ·  {}  ·  {}",
+            format_size(entry.size),
+            format_modified(entry.modified),
+            entry.kind.label()
+        );
+
+        items.push(ListItem::new(vec![
+            Line::from(Span::styled(
+                truncate_keep_end(&entry.name, inner.width as usize - 4),
+                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(subtitle, Style::default().fg(theme.muted))),
+        ]));
+    }
+
+    if items.is_empty() {
+        items.push(ListItem::new(Span::styled(
+            "nenhum download encontrado",
+            Style::default().fg(theme.muted),
+        )));
+    }
+
+    let history_list = List::new(items)
+        .block(block_with_title(theme, "downloads concluídos"))
+        .style(Style::default().bg(theme.panel));
+
+    frame.render_widget(history_list, list_area);
 }
 
 fn render_connection_panel(
