@@ -35,10 +35,65 @@ use components::{Button, ButtonAction, ClickTarget, ReceivedClickAction, Receive
 
 const MAX_PEER_INPUT: usize = 120;
 const MAX_LOGS: usize = 200;
+const MAX_LOG_QUERY: usize = 120;
 const PROGRESS_BAR_WIDTH: usize = 16;
 const RECEIVED_OPEN_BUTTON_TEXT: &str = " Abrir ";
 const RECEIVED_FOLDER_BUTTON_TEXT: &str = " Pasta ";
 const LOG_FILE_PATH: &str = "p2p_logs.txt";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LogLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    fn label(self) -> &'static str {
+        match self {
+            LogLevel::Info => "INFO",
+            LogLevel::Warn => "WARN",
+            LogLevel::Error => "ERRO",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LogLevelFilter {
+    All,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevelFilter {
+    fn next(self) -> Self {
+        match self {
+            LogLevelFilter::All => LogLevelFilter::Info,
+            LogLevelFilter::Info => LogLevelFilter::Warn,
+            LogLevelFilter::Warn => LogLevelFilter::Error,
+            LogLevelFilter::Error => LogLevelFilter::All,
+        }
+    }
+
+    fn matches(self, level: LogLevel) -> bool {
+        match self {
+            LogLevelFilter::All => true,
+            LogLevelFilter::Info => matches!(level, LogLevel::Info),
+            LogLevelFilter::Warn => matches!(level, LogLevel::Warn),
+            LogLevelFilter::Error => matches!(level, LogLevel::Error),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            LogLevelFilter::All => "todos",
+            LogLevelFilter::Info => "info",
+            LogLevelFilter::Warn => "warn",
+            LogLevelFilter::Error => "erro",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum IpMode {
@@ -114,6 +169,12 @@ struct ProbeStatus {
 }
 
 #[derive(Clone)]
+struct LogEntry {
+    level: LogLevel,
+    message: String,
+}
+
+#[derive(Clone)]
 struct OutgoingEntry {
     path: PathBuf,
     file_id: Option<u64>,
@@ -152,8 +213,7 @@ struct IncomingEntry {
     received_bytes: u64,
     status: IncomingStatus,
     rate_mbps: f64,
-    rate_last_at: Option<Instant>,
-    rate_last_bytes: u64,
+    rate_started_at: Option<Instant>,
 }
 
 #[derive(Clone, Copy)]
@@ -224,7 +284,11 @@ pub struct AppState {
     received_click_targets: Vec<ReceivedClickTarget>,
     selected: Vec<OutgoingEntry>,
     received: Vec<IncomingEntry>,
-    logs: Vec<String>,
+    logs: Vec<LogEntry>,
+    log_filter: LogLevelFilter,
+    log_query: String,
+    log_query_lower: String,
+    log_search_focus: bool,
     logs_scroll: usize,
     logs_view_height: usize,
     logs_area: Rect,
@@ -272,6 +336,10 @@ impl AppState {
             selected: Vec::new(),
             received: Vec::new(),
             logs: Vec::new(),
+            log_filter: LogLevelFilter::All,
+            log_query: String::new(),
+            log_query_lower: String::new(),
+            log_search_focus: false,
             logs_scroll: 0,
             logs_view_height: 0,
             logs_area: Rect::default(),
@@ -285,32 +353,87 @@ impl AppState {
 
     fn push_log(&mut self, message: impl Into<String>) {
         let message = message.into();
+        let level = infer_log_level(&message);
+        self.push_log_with_level(level, message);
+    }
+
+    fn push_log_with_level(&mut self, level: LogLevel, message: impl Into<String>) {
+        let message = message.into();
+        let formatted = format_log_line(level, &message);
         let was_at_bottom = self.logs_scroll == self.max_logs_scroll();
-        self.logs.push(message.clone());
+        self.logs.push(LogEntry { level, message });
         if self.logs.len() > MAX_LOGS {
             let excess = self.logs.len() - MAX_LOGS;
             self.logs.drain(0..excess);
             self.logs_scroll = self.logs_scroll.saturating_sub(excess);
         }
 
-        if was_at_bottom {
-            self.logs_scroll = self.max_logs_scroll();
-        } else {
-            self.logs_scroll = self.logs_scroll.min(self.max_logs_scroll());
-        }
+        self.adjust_logs_scroll(was_at_bottom);
 
-        if let Err(err) = append_log_to_file(&message) {
+        if let Err(err) = append_log_to_file(&formatted) {
             eprintln!("failed to write log file: {err}");
         }
     }
 
     fn max_logs_scroll(&self) -> usize {
-        self.logs.len().saturating_sub(self.logs_view_height)
+        self.visible_logs_len()
+            .saturating_sub(self.logs_view_height)
     }
 
     fn set_logs_view_height(&mut self, height: usize) {
         self.logs_view_height = height;
         self.logs_scroll = self.logs_scroll.min(self.max_logs_scroll());
+    }
+
+    fn set_log_filter(&mut self, filter: LogLevelFilter) {
+        if self.log_filter != filter {
+            let stick_to_bottom = self.logs_scroll == self.max_logs_scroll();
+            self.log_filter = filter;
+            self.adjust_logs_scroll(stick_to_bottom);
+        }
+    }
+
+    fn cycle_log_filter(&mut self) {
+        let next = self.log_filter.next();
+        self.set_log_filter(next);
+    }
+
+    fn set_log_query(&mut self, query: String) {
+        let stick_to_bottom = self.logs_scroll == self.max_logs_scroll();
+        self.log_query = query;
+        self.log_query_lower = self.log_query.to_ascii_lowercase();
+        self.adjust_logs_scroll(stick_to_bottom);
+    }
+
+    fn adjust_logs_scroll(&mut self, stick_to_bottom: bool) {
+        if stick_to_bottom {
+            self.logs_scroll = self.max_logs_scroll();
+        } else {
+            self.logs_scroll = self.logs_scroll.min(self.max_logs_scroll());
+        }
+    }
+
+    fn visible_logs_len(&self) -> usize {
+        self.logs
+            .iter()
+            .filter(|entry| self.log_matches(entry))
+            .count()
+    }
+
+    fn visible_logs(&self) -> Vec<&LogEntry> {
+        self.logs
+            .iter()
+            .filter(|entry| self.log_matches(entry))
+            .collect()
+    }
+
+    fn log_matches(&self, entry: &LogEntry) -> bool {
+        self.log_filter.matches(entry.level)
+            && (self.log_query_lower.is_empty()
+                || entry
+                    .message
+                    .to_ascii_lowercase()
+                    .contains(&self.log_query_lower))
     }
 
     fn scroll_logs_up(&mut self, lines: usize) {
@@ -408,6 +531,8 @@ pub fn run_app(
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     if app.peer_focus {
                         handle_peer_input_key(app, key.code, &net_tx);
+                    } else if app.log_search_focus {
+                        handle_log_search_key(app, key.code);
                     } else {
                         match key.code {
                             KeyCode::Up => app.scroll_logs_up(1),
@@ -416,6 +541,11 @@ pub fn run_app(
                             KeyCode::PageDown => app.scroll_logs_down(app.logs_view_height.max(1)),
                             KeyCode::Home => app.scroll_logs_top(),
                             KeyCode::End => app.scroll_logs_bottom(),
+                            KeyCode::Char('/') => {
+                                app.peer_focus = false;
+                                app.log_search_focus = true;
+                            }
+                            KeyCode::Char('f') => app.cycle_log_filter(),
                             KeyCode::Char('m') => {
                                 app.mouse_capture_request = Some(!app.mouse_capture_enabled);
                             }
@@ -525,7 +655,7 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 entry.status = IncomingStatus::Done;
                 entry.received_bytes = entry.size;
                 entry.rate_mbps = 0.0;
-                entry.rate_last_at = None;
+                entry.rate_started_at = None;
             }
             app.push_log(format!("recebido {}", path.display()));
         }
@@ -603,8 +733,7 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 received_bytes: 0,
                 status: IncomingStatus::Receiving,
                 rate_mbps: 0.0,
-                rate_last_at: Some(Instant::now()),
-                rate_last_bytes: 0,
+                rate_started_at: Some(Instant::now()),
             });
         }
         NetEvent::ReceiveProgress {
@@ -618,22 +747,20 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 .find(|entry| entry.file_id == file_id)
             {
                 let now = Instant::now();
-                if let Some(last_at) = entry.rate_last_at {
-                    let dt = now.duration_since(last_at);
-                    if dt >= Duration::from_millis(250) {
-                        let new_bytes = bytes_received.min(size);
-                        let delta = new_bytes.saturating_sub(entry.rate_last_bytes);
-                        let dt_s = dt.as_secs_f64().max(0.001);
-                        entry.rate_mbps = (delta as f64 * 8.0) / dt_s / 1_000_000.0;
-                        entry.rate_last_at = Some(now);
-                        entry.rate_last_bytes = new_bytes;
-                    }
-                } else {
-                    entry.rate_last_at = Some(now);
-                    entry.rate_last_bytes = bytes_received.min(size);
-                }
+                let new_bytes = bytes_received.min(size);
                 entry.size = size;
-                entry.received_bytes = bytes_received.min(size);
+                entry.received_bytes = new_bytes;
+
+                if entry.rate_started_at.is_none() {
+                    entry.rate_started_at = Some(now);
+                }
+
+                if let Some(started_at) = entry.rate_started_at {
+                    let elapsed = now.duration_since(started_at).as_secs_f64();
+                    if elapsed > 0.0 {
+                        entry.rate_mbps = (new_bytes as f64 * 8.0) / elapsed / 1_000_000.0;
+                    }
+                }
                 if matches!(entry.status, IncomingStatus::Done) {
                     entry.status = IncomingStatus::Receiving;
                 }
@@ -647,7 +774,7 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
             {
                 entry.status = IncomingStatus::Canceled;
                 entry.rate_mbps = 0.0;
-                entry.rate_last_at = None;
+                entry.rate_started_at = None;
             }
             app.push_log(format!("recebimento cancelado {}", path.display()));
         }
@@ -705,6 +832,7 @@ fn handle_mouse_event(
         }
         MouseEventKind::Down(MouseButton::Left) => {
             app.last_mouse = Some(position);
+            app.log_search_focus = false;
             if point_in_rect(mouse.column, mouse.row, app.peer_input_area) {
                 app.peer_focus = true;
                 return;
@@ -870,6 +998,35 @@ fn handle_peer_input_key(
     }
 }
 
+fn handle_log_search_key(app: &mut AppState, key: KeyCode) {
+    match key {
+        KeyCode::Esc | KeyCode::Enter => {
+            app.log_search_focus = false;
+        }
+        KeyCode::Backspace => {
+            if !app.log_query.is_empty() {
+                let mut query = app.log_query.clone();
+                query.pop();
+                app.set_log_query(query);
+            }
+        }
+        KeyCode::Char(c) => {
+            if app.log_query.len() < MAX_LOG_QUERY {
+                let mut query = app.log_query.clone();
+                query.push(c);
+                app.set_log_query(query);
+            }
+        }
+        KeyCode::Up => app.scroll_logs_up(1),
+        KeyCode::Down => app.scroll_logs_down(1),
+        KeyCode::PageUp => app.scroll_logs_up(app.logs_view_height.max(1)),
+        KeyCode::PageDown => app.scroll_logs_down(app.logs_view_height.max(1)),
+        KeyCode::Home => app.scroll_logs_top(),
+        KeyCode::End => app.scroll_logs_bottom(),
+        _ => {}
+    }
+}
+
 fn copy_local_ip(app: &mut AppState) {
     let addr = match app.current_local_ip() {
         Some(addr) => addr,
@@ -998,17 +1155,15 @@ fn nat_tip_text(app: &AppState) -> String {
     match (app.public_endpoint, app.stun_status.as_deref()) {
         (Some(endpoint), _) => {
             if endpoint.port() == port {
-                format!("porta {port} aparente ({endpoint}); compartilhe esse endpoint")
+                format!("endpoint {endpoint} (UDP {port})")
             } else {
-                format!(
-                    "porta local {port} mapeada como {endpoint}; considere redirecionar a mesma porta"
-                )
+                format!("local {port} → {endpoint}")
             }
         }
         (None, Some(status)) => {
-            format!("STUN: {status}; encaminhe UDP {port} ou libere firewall")
+            format!("STUN: {status} · libere UDP {port}")
         }
-        (None, None) => format!("aguardando STUN; abra/encaminhe UDP {port} se precisar"),
+        (None, None) => format!("STUN pendente · UDP {port}"),
     }
 }
 
@@ -1122,21 +1277,30 @@ fn primary_button_style(theme: Theme, hover: bool) -> Style {
     }
 }
 
-fn log_style(theme: Theme, line: &str) -> Style {
-    let lower = line.to_ascii_lowercase();
-    if lower.contains("erro") {
-        Style::default().fg(theme.danger)
-    } else if lower.contains("cancel") {
-        Style::default().fg(theme.warn)
-    } else if lower.contains("timeout") || lower.contains("esgotado") {
-        Style::default().fg(theme.warn)
-    } else if lower.contains("conectado") || lower.contains("enviado") || lower.contains("recebido")
+fn infer_log_level(message: &str) -> LogLevel {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("erro") || lower.contains("fail") {
+        LogLevel::Error
+    } else if lower.contains("cancel")
+        || lower.contains("timeout")
+        || lower.contains("esgotado")
+        || lower.contains("indisponivel")
     {
-        Style::default().fg(theme.ok)
-    } else if lower.contains("conectando") {
-        Style::default().fg(theme.warn)
+        LogLevel::Warn
     } else {
-        Style::default().fg(theme.text)
+        LogLevel::Info
+    }
+}
+
+fn format_log_line(level: LogLevel, message: &str) -> String {
+    format!("[{}] {message}", level.label())
+}
+
+fn log_style(theme: Theme, entry: &LogEntry) -> Style {
+    match entry.level {
+        LogLevel::Error => Style::default().fg(theme.danger),
+        LogLevel::Warn => Style::default().fg(theme.warn),
+        LogLevel::Info => Style::default().fg(theme.text),
     }
 }
 
@@ -1515,21 +1679,56 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     app.received_click_targets = build_received_click_targets(right[0], &received_view);
     frame.render_widget(received, right[0]);
 
-    app.logs_area = right[1];
-    app.set_logs_view_height(right[1].height.saturating_sub(2) as usize);
+    let logs_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(right[1]);
 
+    let query_text = if app.log_query.is_empty() {
+        "(todas)".to_string()
+    } else {
+        app.log_query.clone()
+    };
+    let query_color = if app.log_search_focus {
+        theme.accent
+    } else {
+        theme.text
+    };
+    let filter_line = Line::from(vec![
+        Span::styled("Filtro (F): ", Style::default().fg(theme.muted)),
+        Span::styled(
+            app.log_filter.label(),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("   "),
+        Span::styled("Busca (/): ", Style::default().fg(theme.muted)),
+        Span::styled(query_text, Style::default().fg(query_color)),
+    ]);
+
+    let logs_filter = Paragraph::new(filter_line).style(Style::default().bg(theme.panel));
+    frame.render_widget(logs_filter, logs_chunks[0]);
+
+    app.logs_area = logs_chunks[1];
+    app.set_logs_view_height(logs_chunks[1].height.saturating_sub(2) as usize);
+
+    let visible_logs = app.visible_logs();
     let start = app.logs_scroll.min(app.max_logs_scroll());
-    let end = (start + app.logs_view_height).min(app.logs.len());
-    let log_items = app.logs[start..end]
+    let end = (start + app.logs_view_height).min(visible_logs.len());
+    let log_items = visible_logs[start..end]
         .iter()
-        .map(|line| ListItem::new(Span::styled(line.clone(), log_style(theme, line))))
+        .map(|entry| {
+            ListItem::new(Span::styled(
+                format_log_line(entry.level, &entry.message),
+                log_style(theme, entry),
+            ))
+        })
         .collect::<Vec<_>>();
 
     let logs = List::new(log_items)
         .block(block_with_title(theme, "eventos"))
         .style(Style::default().bg(theme.panel));
 
-    frame.render_widget(logs, right[1]);
+    frame.render_widget(logs, logs_chunks[1]);
 
     let mut buttons = Vec::new();
     buttons.append(&mut header_buttons);
@@ -1887,17 +2086,14 @@ fn render_connection_panel(
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| "nenhum".to_string());
     let detected_line = Line::from(vec![
-        Span::styled("IPs: ", Style::default().fg(theme.muted)),
-        Span::styled(format!("v4 {detected_v4}"), Style::default().fg(theme.text)),
-        Span::raw(" "),
-        Span::styled("•", Style::default().fg(theme.muted)),
-        Span::raw(" "),
-        Span::styled(format!("v6 {detected_v6}"), Style::default().fg(theme.text)),
-        Span::raw(" "),
-        Span::styled("•", Style::default().fg(theme.muted)),
-        Span::raw(" "),
+        Span::styled("v4 ", Style::default().fg(theme.muted)),
+        Span::styled(format!("{detected_v4}"), Style::default().fg(theme.text)),
+        Span::styled(" · ", Style::default().fg(theme.muted)),
+        Span::styled("v6 ", Style::default().fg(theme.muted)),
+        Span::styled(format!("{detected_v6}"), Style::default().fg(theme.text)),
+        Span::styled(" · ", Style::default().fg(theme.muted)),
         Span::styled(
-            format!("porta UDP {}", app.bind_addr.port()),
+            format!("UDP {}", app.bind_addr.port()),
             Style::default().fg(theme.muted),
         ),
     ]);
