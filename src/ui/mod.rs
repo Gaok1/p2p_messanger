@@ -1,3 +1,7 @@
+// ================================================
+//  ARQUIVO 1 — ui.rs  (render + input + mouse)
+// ================================================
+
 use std::{
     fs::OpenOptions,
     io::{self, Write},
@@ -36,6 +40,10 @@ use components::{Button, ButtonAction, ClickTarget, ReceivedClickAction, Receive
 mod state;
 pub use state::*;
 
+// -------------------------------
+// Terminal lifecycle
+// -------------------------------
+
 pub fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -54,6 +62,10 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -
     terminal.show_cursor()?;
     Ok(())
 }
+
+// -------------------------------
+// Main loop
+// -------------------------------
 
 pub fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
@@ -85,6 +97,7 @@ pub fn run_app(
                     } else if app.history_search_focus {
                         handle_history_search_key(app, key.code);
                     } else {
+                        // Hotkeys continuam existindo, mas TUDO também tem botão.
                         match key.code {
                             KeyCode::Up => match app.active_tab {
                                 ActiveTab::Downloads => app.scroll_history_up(1),
@@ -117,9 +130,7 @@ pub fn run_app(
                                 _ => app.scroll_logs_bottom(),
                             },
                             KeyCode::Char('/') => {
-                                app.peer_focus = false;
-                                app.log_search_focus = false;
-                                app.history_search_focus = false;
+                                app.clear_focus();
                                 if matches!(app.active_tab, ActiveTab::Downloads) {
                                     app.history_search_focus = true;
                                 } else {
@@ -141,10 +152,10 @@ pub fn run_app(
                             {
                                 app.refresh_history();
                             }
-                            KeyCode::Char('1') => app.active_tab = ActiveTab::Transfers,
-                            KeyCode::Char('2') => app.active_tab = ActiveTab::Downloads,
-                            KeyCode::Char('3') => app.active_tab = ActiveTab::Events,
-                            KeyCode::Tab => app.active_tab = app.active_tab.next(),
+                            KeyCode::Char('1') => app.set_active_tab(ActiveTab::Transfers),
+                            KeyCode::Char('2') => app.set_active_tab(ActiveTab::Downloads),
+                            KeyCode::Char('3') => app.set_active_tab(ActiveTab::Events),
+                            KeyCode::Tab => app.set_active_tab(app.active_tab.next()),
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             _ => {}
                         }
@@ -158,14 +169,12 @@ pub fn run_app(
         if let Some(enabled) = app.mouse_capture_request.take() {
             set_mouse_capture(terminal, enabled)?;
             app.mouse_capture_enabled = enabled;
+
             if enabled {
-                app.push_log(
-                    "mouse capturado: cliques habilitados (pressione 'm' para liberar seleção)",
-                );
+                app.push_log("mouse capturado: cliques habilitados (botões funcionam)");
             } else {
-                app.push_log(
-                    "mouse livre: selecione o texto no terminal (pressione 'm' para voltar)",
-                );
+                // Aqui não tem como fugir: para voltar a clicar, precisa reativar.
+                app.push_log("mouse livre: selecione texto no terminal (pressione 'm' para voltar aos cliques)" );
             }
         }
 
@@ -188,6 +197,10 @@ fn set_mouse_capture(
     }
     Ok(())
 }
+
+// -------------------------------
+// Net events
+// -------------------------------
 
 fn handle_net_event(app: &mut AppState, event: NetEvent) {
     match event {
@@ -418,11 +431,17 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
     }
 }
 
+// -------------------------------
+// Mouse / click
+// -------------------------------
+
 fn handle_mouse_event(
     app: &mut AppState,
     mouse: MouseEvent,
     net_tx: &tokio_mpsc::UnboundedSender<NetCommand>,
 ) {
+    // Sem mouse capture: não tem clique (limitação do terminal).
+    // Por isso: default é ON; e a UI deixa isso explícito.
     if !app.mouse_capture_enabled {
         return;
     }
@@ -453,25 +472,37 @@ fn handle_mouse_event(
         }
         MouseEventKind::Down(MouseButton::Left) => {
             app.last_mouse = Some(position);
-            app.log_search_focus = false;
+
+            // Foco input (clique no campo)
             if point_in_rect(mouse.column, mouse.row, app.peer_input_area) {
                 app.peer_focus = true;
+                app.log_search_focus = false;
+                app.history_search_focus = false;
                 return;
             }
+
+            // Clique fora: tira foco do input
             app.peer_focus = false;
 
-            if point_in_rect(mouse.column, mouse.row, app.local_panel_area)
-                || point_in_rect(mouse.column, mouse.row, app.public_panel_area)
-            {
-                app.mouse_capture_request = Some(false);
+            // 1) Tabs clicáveis
+            let tab_targets = app.tab_click_targets.clone();
+            if handle_click_targets(&tab_targets, position, app, net_tx) {
                 return;
             }
 
+            // 2) Ações “UI” (scroll top/bottom, abrir busca, etc.)
+            let ui_targets = app.ui_click_targets.clone();
+            if handle_click_targets(&ui_targets, position, app, net_tx) {
+                return;
+            }
+
+            // 3) Recebidos (Abrir / Pasta)
             let received_targets = app.received_click_targets.clone();
             if handle_click_targets(&received_targets, position, app, net_tx) {
                 return;
             }
 
+            // 4) Botões “normais”
             let buttons = app.buttons.clone();
             handle_click_targets(&buttons, position, app, net_tx);
         }
@@ -501,7 +532,13 @@ fn handle_button_action(
 ) {
     match action {
         ButtonAction::ConnectPeer => start_connect(app, net_tx),
-        ButtonAction::ProbePeer => start_probe(app, net_tx),
+        ButtonAction::ProbePeer => {
+            if app.peer_input.trim().is_empty() {
+                app.push_log("informe o IP/porta do parceiro antes de testar");
+                return;
+            }
+            start_probe(app, net_tx)
+        }
         ButtonAction::SelectIpv4 => handle_mode_change(app, IpMode::Ipv4, net_tx),
         ButtonAction::SelectIpv6 => handle_mode_change(app, IpMode::Ipv6, net_tx),
         ButtonAction::ToggleMouseMode => {
@@ -554,6 +591,10 @@ fn handle_button_action(
         ButtonAction::Quit => app.should_quit = true,
     }
 }
+
+// -------------------------------
+// Mode / peer input
+// -------------------------------
 
 fn handle_mode_change(
     app: &mut AppState,
@@ -677,6 +718,51 @@ fn handle_history_search_key(app: &mut AppState, key: KeyCode) {
     }
 }
 
+fn start_probe(app: &mut AppState, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
+    match parse_peer_addr(&app.peer_input) {
+        Some(addr) => {
+            app.probe_status = Some(ProbeStatus {
+                peer: addr,
+                message: "testando conectividade...".to_string(),
+                ok: None,
+            });
+            if let Err(err) = net_tx.send(NetCommand::ProbePeer(addr)) {
+                app.push_log(format!("erro ao testar conexao {err}"));
+            } else {
+                app.push_log(format!("teste rapido iniciado para {addr}"));
+            }
+        }
+        None => app.push_log("endereco do parceiro invalido"),
+    }
+}
+
+fn start_connect(app: &mut AppState, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
+    match parse_peer_addr(&app.peer_input) {
+        Some(addr) => {
+            if let Err(err) = net_tx.send(NetCommand::ConnectPeer(addr)) {
+                app.push_log(format!("erro ao enviar conexao {err}"));
+            } else {
+                app.connect_status = ConnectStatus::Connecting(addr);
+                app.peer_addr = None;
+            }
+        }
+        None => app.push_log("endereco do parceiro invalido"),
+    }
+}
+
+fn parse_peer_addr(input: &str) -> Option<SocketAddr> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    trimmed.parse().ok()
+}
+
+// -------------------------------
+// Clipboard
+// -------------------------------
+
 fn copy_local_ip(app: &mut AppState) {
     let addr = match app.current_local_ip() {
         Some(addr) => addr,
@@ -745,50 +831,9 @@ fn paste_peer_ip(app: &mut AppState) {
     }
 }
 
-fn start_probe(app: &mut AppState, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
-    match parse_peer_addr(&app.peer_input) {
-        Some(addr) => {
-            app.probe_status = Some(ProbeStatus {
-                peer: addr,
-                message: "testando conectividade...".to_string(),
-                ok: None,
-            });
-            if let Err(err) = net_tx.send(NetCommand::ProbePeer(addr)) {
-                app.push_log(format!("erro ao testar conexao {err}"));
-            } else {
-                app.push_log(format!("teste rapido iniciado para {addr}"));
-            }
-        }
-        None => app.push_log("endereco do parceiro invalido"),
-    }
-}
-
-fn start_connect(app: &mut AppState, net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
-    match parse_peer_addr(&app.peer_input) {
-        Some(addr) => {
-            if let Err(err) = net_tx.send(NetCommand::ConnectPeer(addr)) {
-                app.push_log(format!("erro ao enviar conexao {err}"));
-            } else {
-                app.connect_status = ConnectStatus::Connecting(addr);
-                app.peer_addr = None;
-            }
-        }
-        None => app.push_log("endereco do parceiro invalido"),
-    }
-}
-
-fn parse_peer_addr(input: &str) -> Option<SocketAddr> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    if let Ok(addr) = trimmed.parse() {
-        return Some(addr);
-    }
-
-    None
-}
+// -------------------------------
+// UI helpers
+// -------------------------------
 
 fn status_color(theme: Theme, status: &ConnectStatus) -> Color {
     match status {
@@ -827,7 +872,7 @@ fn probe_summary(app: &AppState) -> String {
             };
             format!("{prefix} {} ({})", status.peer, status.message)
         }
-        None => "sem teste rapido (use o botao Testar)".to_string(),
+        None => "sem teste rapido".to_string(),
     }
 }
 
@@ -913,7 +958,6 @@ fn mode_button_style(theme: Theme, active: bool, hover: bool, enabled: bool) -> 
 }
 
 fn primary_button_style(theme: Theme, hover: bool) -> Style {
-    // Botão “principal” do header (conectar)
     if hover {
         Style::default()
             .fg(theme.bg)
@@ -926,6 +970,88 @@ fn primary_button_style(theme: Theme, hover: bool) -> Style {
             .add_modifier(Modifier::BOLD)
     }
 }
+
+// -------------------------------
+// Clickable tabs + UI actions
+// -------------------------------
+
+#[derive(Clone)]
+struct TabClickTarget {
+    area: Rect,
+    tab: ActiveTab,
+}
+
+impl ClickTarget for TabClickTarget {
+    fn contains(&self, x: u16, y: u16) -> bool {
+        point_in_rect(x, y, self.area)
+    }
+
+    fn on_click(&self, app: &mut AppState, _net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
+        app.set_active_tab(self.tab);
+    }
+
+    fn area(&self) -> Rect {
+        self.area
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum UiAction {
+    LogsTop,
+    LogsBottom,
+    HistoryTop,
+    HistoryBottom,
+    FocusSearch,
+    CycleFilter,
+    RefreshHistory,
+}
+
+#[derive(Clone)]
+struct UiClickTarget {
+    area: Rect,
+    action: UiAction,
+}
+
+impl ClickTarget for UiClickTarget {
+    fn contains(&self, x: u16, y: u16) -> bool {
+        point_in_rect(x, y, self.area)
+    }
+
+    fn on_click(&self, app: &mut AppState, _net_tx: &tokio_mpsc::UnboundedSender<NetCommand>) {
+        match self.action {
+            UiAction::LogsTop => app.scroll_logs_top(),
+            UiAction::LogsBottom => app.scroll_logs_bottom(),
+            UiAction::HistoryTop => app.history_scroll = 0,
+            UiAction::HistoryBottom => app.history_scroll = app.max_history_scroll(),
+            UiAction::FocusSearch => {
+                app.clear_focus();
+                if matches!(app.active_tab, ActiveTab::Downloads) {
+                    app.history_search_focus = true;
+                } else {
+                    app.log_search_focus = true;
+                }
+            }
+            UiAction::CycleFilter => {
+                if matches!(app.active_tab, ActiveTab::Downloads) {
+                    app.cycle_history_filter();
+                } else {
+                    app.cycle_log_filter();
+                }
+            }
+            UiAction::RefreshHistory => {
+                app.refresh_history();
+            }
+        }
+    }
+
+    fn area(&self) -> Rect {
+        self.area
+    }
+}
+
+// -------------------------------
+// Logs / transfers / downloads rendering
+// -------------------------------
 
 fn infer_log_level(message: &str) -> LogLevel {
     let lower = message.to_ascii_lowercase();
@@ -1119,7 +1245,6 @@ fn render_incoming_info_line(
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| entry.path.display().to_string());
 
-    // --- status agora é “texto em destaque” (sem fundo) ---
     let status_label = entry.status.label();
     let status_text = Span::styled(
         status_label,
@@ -1127,14 +1252,12 @@ fn render_incoming_info_line(
     );
     let status_len = status_label.chars().count();
 
-    // Ícone compacto (sem emoji) pra leitura rápida
     let icon = match entry.status {
         IncomingStatus::Receiving => "↓",
         IncomingStatus::Done => "✓",
         IncomingStatus::Canceled => "×",
     };
 
-    // Meta do lado direito: tamanho + taxa (se recebendo)
     let mut meta_parts: Vec<String> = Vec::new();
     if entry.size > 0 {
         meta_parts.push(format_bytes(entry.size));
@@ -1151,10 +1274,8 @@ fn render_incoming_info_line(
         return ListItem::new(Line::from(Vec::<Span>::new()));
     }
 
-    // Layout:
-    // "│ " + icon + " " + status + " " + name + filler + (meta?) + " │"
-    let left_len = 4; // '│' + ' ' + icon + ' '
-    let right_len = 2; // ' ' + '│'
+    let left_len = 4;
+    let right_len = 2;
     let between_status_and_name = 1;
 
     let reserved = left_len
@@ -1165,7 +1286,7 @@ fn render_incoming_info_line(
             0
         } else {
             1 + meta_len
-        }; // espaço + meta
+        };
 
     let name_area = available.saturating_sub(reserved);
     let name = truncate_keep_end(&filename, name_area);
@@ -1182,7 +1303,6 @@ fn render_incoming_info_line(
         name,
         Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
     );
-
     let filler = Span::raw(" ".repeat(filler_len));
 
     let mut spans = vec![
@@ -1227,6 +1347,7 @@ fn render_incoming_action_line(
 
     let open_rect = received_open_button_rect(list_area, row_idx);
     let folder_rect = received_folder_button_rect(list_area, row_idx);
+
     let open_hover = show_actions
         && open_rect.width > 0
         && hover.is_some_and(|(x, y)| point_in_rect(x, y, open_rect));
@@ -1299,32 +1420,29 @@ fn build_received_view<'a>(
     received.iter().rev().take(max_entries).collect()
 }
 
+// -------------------------------
+// Main draw
+// -------------------------------
+
 fn draw_ui(frame: &mut Frame, app: &mut AppState) {
     let theme = Theme::default_dark();
 
-    // "pinta" o fundo inteiro (evita ficar com blocos soltos)
     frame.render_widget(root_bg(theme), frame.size());
 
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(24), // header + destaque
-            Constraint::Length(3),  // tabs
-            Constraint::Min(12),    // content
-            Constraint::Length(4),  // buttons
+            Constraint::Length(20), // header (conexão)
+            Constraint::Length(3),  // tabs (clicáveis)
+            Constraint::Min(10),    // conteúdo
+            Constraint::Length(4),  // footer buttons
         ])
         .split(frame.size());
 
-    let header_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(20), Constraint::Length(4)])
-        .split(outer[0]);
-
-    let (peer_input_area, mut header_buttons) =
-        render_connection_panel(frame, header_chunks[0], app, app.last_mouse, theme);
+    let (peer_input_area, header_buttons) =
+        render_connection_panel(frame, outer[0], app, app.last_mouse, theme);
     app.peer_input_area = peer_input_area;
 
-    render_status_overview(frame, header_chunks[1], app, theme);
     render_tab_bar(frame, outer[1], app, theme);
 
     match app.active_tab {
@@ -1333,75 +1451,21 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         ActiveTab::Events => render_events_tab(frame, outer[2], app, theme),
     }
 
-    let mut buttons = Vec::new();
-    buttons.append(&mut header_buttons);
-    buttons.extend(render_buttons(frame, outer[3], app, theme));
-    app.buttons = buttons;
+    let mut all_buttons = Vec::new();
+    all_buttons.extend(header_buttons);
+    all_buttons.extend(render_footer_buttons(frame, outer[3], app, theme));
+    app.buttons = all_buttons;
 }
 
-fn render_status_overview(frame: &mut Frame, area: Rect, app: &AppState, theme: Theme) {
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(34),
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-        ])
-        .split(area);
+// -------------------------------
+// Tabs (clicáveis)
+// -------------------------------
 
-    let connect = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled("Vínculo ", Style::default().fg(theme.muted)),
-            chip(theme, app.mode_label(), theme.accent),
-        ]),
-        Line::from(vec![Span::styled(
-            app.connect_status.label(),
-            Style::default()
-                .fg(status_color(theme, &app.connect_status))
-                .add_modifier(Modifier::BOLD),
-        )]),
-    ])
-    .block(block_with_title(theme, "Conexão"))
-    .alignment(Alignment::Center)
-    .style(Style::default().bg(theme.panel));
-
-    let nat = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled("Portas ", Style::default().fg(theme.muted)),
-            Span::styled(app.bind_addr.port().to_string(), title_style(theme)),
-        ]),
-        Line::from(vec![Span::styled(
-            nat_tip_text(app),
-            Style::default().fg(theme.text),
-        )]),
-    ])
-    .block(block_with_title(theme, "Rede / NAT"))
-    .style(Style::default().bg(theme.panel));
-
-    let probe = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled("Autodiagnóstico ", Style::default().fg(theme.muted)),
-            chip(theme, "F", theme.info),
-            Span::raw("  (r para atualizar histórico)"),
-        ]),
-        Line::from(vec![Span::styled(
-            probe_summary(app),
-            Style::default().fg(theme.text),
-        )]),
-    ])
-    .block(block_with_title(theme, "Saúde do nó"))
-    .style(Style::default().bg(theme.panel));
-
-    frame.render_widget(connect, columns[0]);
-    frame.render_widget(nat, columns[1]);
-    frame.render_widget(probe, columns[2]);
-}
-
-fn render_tab_bar(frame: &mut Frame, area: Rect, app: &AppState, theme: Theme) {
+fn render_tab_bar(frame: &mut Frame, area: Rect, app: &mut AppState, theme: Theme) {
     let tabs = [
-        ("1 Transferências", ActiveTab::Transfers),
-        ("2 Downloads", ActiveTab::Downloads),
-        ("3 Eventos", ActiveTab::Events),
+        ("Transferências", ActiveTab::Transfers),
+        ("Downloads", ActiveTab::Downloads),
+        ("Eventos", ActiveTab::Events),
     ];
 
     let sections = Layout::default()
@@ -1412,6 +1476,8 @@ fn render_tab_bar(frame: &mut Frame, area: Rect, app: &AppState, theme: Theme) {
             Constraint::Percentage(33),
         ])
         .split(area);
+
+    let mut targets = Vec::new();
 
     for ((label, tab), chunk) in tabs.into_iter().zip(sections.iter()) {
         let active = app.active_tab == tab;
@@ -1428,13 +1494,28 @@ fn render_tab_bar(frame: &mut Frame, area: Rect, app: &AppState, theme: Theme) {
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(theme.border))
             .style(Style::default().bg(theme.panel));
-        let tab_widget = Paragraph::new(label)
+
+        let hint = match tab {
+            ActiveTab::Transfers => "(1)",
+            ActiveTab::Downloads => "(2)",
+            ActiveTab::Events => "(3)",
+        };
+
+        let tab_widget = Paragraph::new(format!("{label} {hint}"))
             .alignment(Alignment::Center)
             .style(style)
             .block(block);
+
         frame.render_widget(tab_widget, *chunk);
+        targets.push(TabClickTarget { area: *chunk, tab });
     }
+
+    app.tab_click_targets = targets;
 }
+
+// -------------------------------
+// Transfer tab
+// -------------------------------
 
 fn render_transfer_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme: Theme) {
     let body = Layout::default()
@@ -1459,9 +1540,11 @@ fn render_transfer_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme:
         .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
         .split(body[1]);
 
+    // Recebendo
     let max_entries = max_received_entries_for_area(right[0]).min(24);
     let received_view = build_received_view(&app.received, max_entries);
     let mut received_items = Vec::new();
+
     for (entry_idx, entry) in received_view.iter().enumerate() {
         received_items.push(render_incoming_info_line(theme, entry, right[0]));
         received_items.push(render_incoming_action_line(
@@ -1480,10 +1563,23 @@ fn render_transfer_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme:
     app.received_click_targets = build_received_click_targets(right[0], &received_view);
     frame.render_widget(received, right[0]);
 
+    // Logs
     let logs_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(2), Constraint::Min(0)])
         .split(right[1]);
+
+    // Barra de controle dos logs (botões visíveis)
+    let ctrl = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(10),
+            Constraint::Length(10),
+            Constraint::Length(10),
+            Constraint::Length(10),
+        ])
+        .split(logs_chunks[0]);
 
     let query_text = if app.log_query.is_empty() {
         "(todas)".to_string()
@@ -1495,18 +1591,54 @@ fn render_transfer_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme:
     } else {
         theme.text
     };
-    let filter_line = Line::from(vec![
-        Span::styled("Filtro (F): ", Style::default().fg(theme.muted)),
+
+    let left_line = Line::from(vec![
+        Span::styled("Filtro: ", Style::default().fg(theme.muted)),
         Span::styled(
             app.log_filter.label(),
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
-        Span::styled("  Busca (/): ", Style::default().fg(theme.muted)),
-        Span::styled(query_text, Style::default().fg(query_color)),
+        Span::styled("  Busca: ", Style::default().fg(theme.muted)),
+        Span::styled(
+            query_text,
+            Style::default()
+                .fg(query_color)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]);
 
-    let logs_filter = Paragraph::new(filter_line).style(Style::default().bg(theme.panel));
-    frame.render_widget(logs_filter, logs_chunks[0]);
+    frame.render_widget(
+        Paragraph::new(left_line).style(Style::default().bg(theme.panel)),
+        ctrl[0],
+    );
+
+    let hover = app.last_mouse;
+
+    // Botões: Buscar, Filtro, Topo, Fundo
+    let btn_search = render_small_ui_button(frame, ctrl[1], "Buscar", hover, theme);
+    let btn_filter = render_small_ui_button(frame, ctrl[2], "Filtro", hover, theme);
+    let btn_top = render_small_ui_button(frame, ctrl[3], "Topo", hover, theme);
+    let btn_bottom = render_small_ui_button(frame, ctrl[4], "Fundo", hover, theme);
+
+    // Alvos clicáveis
+    app.ui_click_targets = vec![
+        UiClickTarget {
+            area: btn_search,
+            action: UiAction::FocusSearch,
+        },
+        UiClickTarget {
+            area: btn_filter,
+            action: UiAction::CycleFilter,
+        },
+        UiClickTarget {
+            area: btn_top,
+            action: UiAction::LogsTop,
+        },
+        UiClickTarget {
+            area: btn_bottom,
+            action: UiAction::LogsBottom,
+        },
+    ];
 
     app.logs_area = logs_chunks[1];
     app.set_logs_view_height(logs_chunks[1].height.saturating_sub(2) as usize);
@@ -1530,6 +1662,10 @@ fn render_transfer_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme:
 
     frame.render_widget(logs, logs_chunks[1]);
 }
+
+// -------------------------------
+// Events tab
+// -------------------------------
 
 fn render_events_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme: Theme) {
     let layout = Layout::default()
@@ -1558,12 +1694,17 @@ fn render_events_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme: T
             Span::styled("Diagnóstico: ", Style::default().fg(theme.muted)),
             Span::styled(probe_summary(app), Style::default().fg(theme.text)),
         ]),
+        Line::from(vec![
+            Span::styled("Rede: ", Style::default().fg(theme.muted)),
+            Span::styled(nat_tip_text(app), Style::default().fg(theme.text)),
+        ]),
     ])
     .block(block_with_title(theme, "Contexto da sessão"))
     .style(Style::default().bg(theme.panel));
 
     frame.render_widget(summary, layout[0]);
 
+    // Reaproveita a lista de logs
     let log_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(2), Constraint::Min(0)])
@@ -1579,18 +1720,27 @@ fn render_events_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme: T
     } else {
         theme.text
     };
+
     let filter_line = Line::from(vec![
-        Span::styled("Filtro (F): ", Style::default().fg(theme.muted)),
+        Span::styled("Filtro: ", Style::default().fg(theme.muted)),
+        Span::styled(app.log_filter.label(), title_style(theme)),
+        Span::styled("  Busca: ", Style::default().fg(theme.muted)),
         Span::styled(
-            app.log_filter.label(),
-            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+            query_text,
+            Style::default()
+                .fg(query_color)
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("  Busca (/): ", Style::default().fg(theme.muted)),
-        Span::styled(query_text, Style::default().fg(query_color)),
+        Span::styled(
+            "  (use botões na aba Transferências) ",
+            Style::default().fg(theme.muted),
+        ),
     ]);
 
-    let logs_filter = Paragraph::new(filter_line).style(Style::default().bg(theme.panel));
-    frame.render_widget(logs_filter, log_layout[0]);
+    frame.render_widget(
+        Paragraph::new(filter_line).style(Style::default().bg(theme.panel)),
+        log_layout[0],
+    );
 
     app.logs_area = log_layout[1];
     app.set_logs_view_height(log_layout[1].height.saturating_sub(2) as usize);
@@ -1615,6 +1765,10 @@ fn render_events_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme: T
     frame.render_widget(logs, log_layout[1]);
 }
 
+// -------------------------------
+// Downloads tab
+// -------------------------------
+
 fn render_downloads_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme: Theme) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -1625,11 +1779,24 @@ fn render_downloads_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme
         ])
         .split(area);
 
+    // Downloads não usam logs
     app.logs_area = Rect::default();
     app.set_logs_view_height(0);
 
+    // Barra de controle (botões visíveis)
+    let top = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(10),
+            Constraint::Length(10),
+            Constraint::Length(10),
+            Constraint::Length(10),
+        ])
+        .split(layout[0]);
+
     let search_line = Line::from(vec![
-        Span::styled("Buscar (/): ", Style::default().fg(theme.muted)),
+        Span::styled("Busca: ", Style::default().fg(theme.muted)),
         Span::styled(
             if app.history_query.is_empty() {
                 "(todos)".to_string()
@@ -1644,23 +1811,53 @@ fn render_downloads_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme
                 })
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("  Filtro (F): ", Style::default().fg(theme.muted)),
+        Span::styled("  Filtro: ", Style::default().fg(theme.muted)),
         Span::styled(app.history_filter.label(), title_style(theme)),
-        Span::styled("  Atualizar (R)", Style::default().fg(theme.muted)),
     ]);
 
-    let search = Paragraph::new(search_line)
-        .block(block_with_title(theme, "histórico de downloads"))
-        .style(Style::default().bg(theme.panel));
-    frame.render_widget(search, layout[0]);
+    frame.render_widget(
+        Paragraph::new(search_line)
+            .block(block_with_title(theme, "histórico de downloads"))
+            .style(Style::default().bg(theme.panel)),
+        top[0],
+    );
+
+    let hover = app.last_mouse;
+
+    let btn_search = render_small_ui_button(frame, top[1], "Buscar", hover, theme);
+    let btn_filter = render_small_ui_button(frame, top[2], "Filtro", hover, theme);
+    let btn_top = render_small_ui_button(frame, top[3], "Topo", hover, theme);
+    let btn_bottom = render_small_ui_button(frame, top[4], "Fundo", hover, theme);
+
+    // Em downloads: UI targets substituem os do logs
+    app.ui_click_targets = vec![
+        UiClickTarget {
+            area: btn_search,
+            action: UiAction::FocusSearch,
+        },
+        UiClickTarget {
+            area: btn_filter,
+            action: UiAction::CycleFilter,
+        },
+        UiClickTarget {
+            area: btn_top,
+            action: UiAction::HistoryTop,
+        },
+        UiClickTarget {
+            area: btn_bottom,
+            action: UiAction::HistoryBottom,
+        },
+    ];
 
     let status_text = app
         .history_status
         .clone()
         .unwrap_or_else(|| format!("{} itens registrados", app.history_entries.len()));
+
     let status = Paragraph::new(status_text)
         .block(subtle_block(theme))
         .style(Style::default().fg(theme.muted).bg(theme.panel));
+
     frame.render_widget(status, layout[1]);
 
     let list_area = layout[2];
@@ -1706,6 +1903,10 @@ fn render_downloads_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme
     frame.render_widget(history_list, list_area);
 }
 
+// -------------------------------
+// Connection panel (botões SEM sumir)
+// -------------------------------
+
 fn render_connection_panel(
     frame: &mut Frame,
     area: Rect,
@@ -1716,26 +1917,26 @@ fn render_connection_panel(
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Length(4),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(4),
+            Constraint::Length(3), // modo + mouse
+            Constraint::Length(4), // input + botões
+            Constraint::Length(3), // local
+            Constraint::Length(3), // publico
+            Constraint::Length(3), // status curto
+            Constraint::Length(4), // assistente
         ])
         .split(area);
 
-    // Linha 1: escolha IPv4 / IPv6
+    // Linha 1: IPv4 / IPv6 / mouse
     let row_modes = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(10),
-            Constraint::Length(10),
+            Constraint::Length(12),
+            Constraint::Length(12),
             Constraint::Min(0),
+            Constraint::Length(18),
         ])
         .split(rows[0]);
 
-    // Alternador IPv4 / IPv6
     let ipv4_button = Button {
         label: "IPv4".to_string(),
         area: row_modes[0],
@@ -1748,18 +1949,13 @@ fn render_connection_panel(
         action: ButtonAction::SelectIpv6,
     };
 
-    let mode_status_area = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(12)])
-        .split(row_modes[2])[1];
-
     let mouse_mode_button = Button {
         label: if app.mouse_capture_enabled {
-            "Copy[M]".to_string()
+            "Cliques: ON".to_string()
         } else {
-            "Static[M]".to_string()
+            "Cliques: OFF".to_string()
         },
-        area: mode_status_area,
+        area: row_modes[3],
         action: ButtonAction::ToggleMouseMode,
     };
 
@@ -1769,6 +1965,9 @@ fn render_connection_panel(
     let ipv6_hover = hover
         .map(|(x, y)| point_in_rect(x, y, ipv6_button.area))
         .unwrap_or(false);
+    let mouse_hover = hover
+        .map(|(x, y)| point_in_rect(x, y, mouse_mode_button.area))
+        .unwrap_or(false);
 
     let ipv4_enabled = app.mode_supported(IpMode::Ipv4);
     let ipv6_enabled = app.mode_supported(IpMode::Ipv6);
@@ -1776,28 +1975,54 @@ fn render_connection_panel(
     let ipv4_style = mode_button_style(theme, app.mode == IpMode::Ipv4, ipv4_hover, ipv4_enabled);
     let ipv6_style = mode_button_style(theme, app.mode == IpMode::Ipv6, ipv6_hover, ipv6_enabled);
 
-    let mouse_mode_hover = hover
-        .map(|(x, y)| point_in_rect(x, y, mouse_mode_button.area))
-        .unwrap_or(false);
-    let mouse_mode_active = !app.mouse_capture_enabled;
-    let mouse_mode_style = mode_button_style(theme, mouse_mode_active, mouse_mode_hover, true);
+    let mouse_style = if app.mouse_capture_enabled {
+        button_style(theme, theme.ok, mouse_hover, true)
+    } else {
+        button_style(theme, theme.warn, mouse_hover, true)
+    };
 
-    let ipv4_widget = Paragraph::new(ipv4_button.label.as_str())
-        .alignment(Alignment::Center)
-        .style(ipv4_style)
-        .block(subtle_block(theme));
-    let ipv6_widget = Paragraph::new(ipv6_button.label.as_str())
-        .alignment(Alignment::Center)
-        .style(ipv6_style)
-        .block(subtle_block(theme));
-    let mouse_mode_widget = Paragraph::new(mouse_mode_button.label.as_str())
-        .alignment(Alignment::Center)
-        .style(mouse_mode_style)
-        .block(subtle_block(theme));
+    frame.render_widget(
+        Paragraph::new(ipv4_button.label.as_str())
+            .alignment(Alignment::Center)
+            .style(ipv4_style)
+            .block(subtle_block(theme)),
+        ipv4_button.area,
+    );
 
-    frame.render_widget(ipv4_widget, ipv4_button.area);
-    frame.render_widget(ipv6_widget, ipv6_button.area);
-    frame.render_widget(mouse_mode_widget, mouse_mode_button.area);
+    frame.render_widget(
+        Paragraph::new(ipv6_button.label.as_str())
+            .alignment(Alignment::Center)
+            .style(ipv6_style)
+            .block(subtle_block(theme)),
+        ipv6_button.area,
+    );
+
+    // Dica curta (sem depender de hotkey)
+    let hint = if app.mouse_capture_enabled {
+        "Clique nos botões".to_string()
+    } else {
+        "Sem clique (aperte M)".to_string()
+    };
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Modo: ", Style::default().fg(theme.muted)),
+            chip(theme, app.mode_label(), theme.accent),
+            Span::raw("   "),
+            Span::styled(hint, Style::default().fg(theme.muted)),
+        ]))
+        .block(subtle_block(theme))
+        .style(Style::default().bg(theme.panel)),
+        row_modes[2],
+    );
+
+    frame.render_widget(
+        Paragraph::new(mouse_mode_button.label.as_str())
+            .alignment(Alignment::Center)
+            .style(mouse_style)
+            .block(subtle_block(theme)),
+        mouse_mode_button.area,
+    );
 
     // Linha 2: input + colar + conectar + testar
     let row_top = Layout::default()
@@ -1805,34 +2030,18 @@ fn render_connection_panel(
         .constraints([
             Constraint::Min(20),
             Constraint::Length(10),
-            Constraint::Length(12),
+            Constraint::Length(14),
             Constraint::Length(12),
         ])
         .split(rows[1]);
 
-    // Linha 2: meu ip + copiar
-    let row_mid = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(20), Constraint::Length(12)])
-        .split(rows[2]);
-
-    // Linha 4: endpoint publico + copiar
-    let row_public = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(20), Constraint::Length(12)])
-        .split(rows[3]);
-
-    // Linha 5: status (chips)
-    let row_status = rows[4];
-
-    // Input
     let input_title = "ip do parceiro";
-
     let placeholder = if matches!(app.mode, IpMode::Ipv4) {
         "ex: 192.0.2.10:12345"
     } else {
         "ex: [2001:db8::1]:12345"
     };
+
     let input_text = if app.peer_input.is_empty() {
         placeholder.to_string()
     } else {
@@ -1844,7 +2053,6 @@ fn render_connection_panel(
     } else {
         theme.text
     });
-
     if app.peer_focus {
         input_style = input_style
             .fg(theme.text)
@@ -1859,33 +2067,19 @@ fn render_connection_panel(
             theme.border
         }));
 
-    let input = Paragraph::new(input_text)
-        .style(input_style)
-        .block(input_block);
+    frame.render_widget(
+        Paragraph::new(input_text)
+            .style(input_style)
+            .block(input_block),
+        row_top[0],
+    );
 
-    frame.render_widget(input, row_top[0]);
-
-    // Colar
     let paste_button = Button {
         label: "Colar".to_string(),
         area: row_top[1],
         action: ButtonAction::PastePeerIp,
     };
 
-    let paste_hover = hover
-        .map(|(x, y)| point_in_rect(x, y, paste_button.area))
-        .unwrap_or(false);
-
-    let paste_style = button_style(theme, theme.info, paste_hover, true);
-
-    let paste_widget = Paragraph::new(paste_button.label.as_str())
-        .alignment(Alignment::Center)
-        .style(paste_style)
-        .block(subtle_block(theme));
-
-    frame.render_widget(paste_widget, paste_button.area);
-
-    // Conectar
     let connect_label = match &app.connect_status {
         ConnectStatus::Connecting(_) => "Conectando",
         ConnectStatus::Connected(_) => "Reconectar",
@@ -1900,58 +2094,70 @@ fn render_connection_panel(
         action: ButtonAction::ConnectPeer,
     };
 
-    let connect_hover = hover
-        .map(|(x, y)| point_in_rect(x, y, connect_button.area))
-        .unwrap_or(false);
-
-    let connect_style = primary_button_style(theme, connect_hover);
-
-    let connect_widget = Paragraph::new(connect_button.label.as_str())
-        .alignment(Alignment::Center)
-        .style(connect_style)
-        .block(subtle_block(theme));
-
-    frame.render_widget(connect_widget, connect_button.area);
-
-    // Testar conexao rapida
     let probe_button = Button {
         label: "Testar".to_string(),
         area: row_top[3],
         action: ButtonAction::ProbePeer,
     };
 
+    let paste_hover = hover
+        .map(|(x, y)| point_in_rect(x, y, paste_button.area))
+        .unwrap_or(false);
+    let connect_hover = hover
+        .map(|(x, y)| point_in_rect(x, y, connect_button.area))
+        .unwrap_or(false);
     let probe_hover = hover
         .map(|(x, y)| point_in_rect(x, y, probe_button.area))
         .unwrap_or(false);
+
+    frame.render_widget(
+        Paragraph::new(paste_button.label.as_str())
+            .alignment(Alignment::Center)
+            .style(button_style(theme, theme.info, paste_hover, true))
+            .block(subtle_block(theme)),
+        paste_button.area,
+    );
+
+    frame.render_widget(
+        Paragraph::new(connect_button.label.as_str())
+            .alignment(Alignment::Center)
+            .style(primary_button_style(theme, connect_hover))
+            .block(subtle_block(theme)),
+        connect_button.area,
+    );
+
     let probe_enabled = !app.peer_input.trim().is_empty();
-    let probe_style = button_style(theme, theme.info, probe_hover, probe_enabled);
+    frame.render_widget(
+        Paragraph::new(probe_button.label.as_str())
+            .alignment(Alignment::Center)
+            .style(button_style(theme, theme.info, probe_hover, probe_enabled))
+            .block(subtle_block(theme)),
+        probe_button.area,
+    );
 
-    let probe_widget = Paragraph::new(probe_button.label.as_str())
-        .alignment(Alignment::Center)
-        .style(probe_style)
-        .block(subtle_block(theme));
+    // Linha 3: Local + copiar
+    let row_mid = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(20), Constraint::Length(12)])
+        .split(rows[2]);
 
-    frame.render_widget(probe_widget, probe_button.area);
-
-    // Meu IP
     let local_text = app
         .current_local_ip()
         .map(|addr| addr.to_string())
         .unwrap_or_else(|| "nao encontrado".to_string());
 
     let local_line = Line::from(vec![
-        Span::styled("meu ip: ", Style::default().fg(theme.muted)),
-        Span::styled(
-            local_text,
-            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("local: ", Style::default().fg(theme.muted)),
+        Span::styled(local_text, title_style(theme)),
     ]);
 
-    let local_panel = Paragraph::new(local_line).block(block_with_title(theme, "local"));
-    frame.render_widget(local_panel, row_mid[0]);
-    app.local_panel_area = row_mid[0];
+    frame.render_widget(
+        Paragraph::new(local_line)
+            .block(block_with_title(theme, "meu IP"))
+            .style(Style::default().bg(theme.panel)),
+        row_mid[0],
+    );
 
-    // Copiar
     let copy_button = Button {
         label: "Copiar".to_string(),
         area: row_mid[1],
@@ -1961,19 +2167,22 @@ fn render_connection_panel(
     let copy_hover = hover
         .map(|(x, y)| point_in_rect(x, y, copy_button.area))
         .unwrap_or(false);
-
     let copy_enabled = app.current_local_ip().is_some();
 
-    let copy_style = button_style(theme, theme.accent, copy_hover, copy_enabled);
+    frame.render_widget(
+        Paragraph::new(copy_button.label.as_str())
+            .alignment(Alignment::Center)
+            .style(button_style(theme, theme.accent, copy_hover, copy_enabled))
+            .block(subtle_block(theme)),
+        copy_button.area,
+    );
 
-    let copy_widget = Paragraph::new(copy_button.label.as_str())
-        .alignment(Alignment::Center)
-        .style(copy_style)
-        .block(subtle_block(theme));
+    // Linha 4: Público + copiar
+    let row_public = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(20), Constraint::Length(12)])
+        .split(rows[3]);
 
-    frame.render_widget(copy_widget, copy_button.area);
-
-    // Endpoint publico (STUN)
     let public_text = match (app.current_public_endpoint(), app.stun_status.as_deref()) {
         (Some(addr), _) => addr.to_string(),
         (None, Some(status)) => status.to_string(),
@@ -1982,18 +2191,18 @@ fn render_connection_panel(
 
     let public_line = Line::from(vec![
         Span::styled("publico: ", Style::default().fg(theme.muted)),
-        Span::styled(
-            public_text,
-            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(public_text, title_style(theme)),
     ]);
 
-    let public_panel = Paragraph::new(public_line).block(block_with_title(theme, "publico"));
-    frame.render_widget(public_panel, row_public[0]);
-    app.public_panel_area = row_public[0];
+    frame.render_widget(
+        Paragraph::new(public_line)
+            .block(block_with_title(theme, "Endpoint público"))
+            .style(Style::default().bg(theme.panel)),
+        row_public[0],
+    );
 
     let copy_public_button = Button {
-        label: "Copiar pub".to_string(),
+        label: "Copiar".to_string(),
         area: row_public[1],
         action: ButtonAction::CopyPublicEndpoint,
     };
@@ -2003,16 +2212,24 @@ fn render_connection_panel(
         .unwrap_or(false);
 
     let copy_public_enabled = app.current_public_endpoint().is_some();
-    let copy_public_style = button_style(theme, theme.info, copy_public_hover, copy_public_enabled);
 
-    let copy_public_widget = Paragraph::new(copy_public_button.label.as_str())
-        .alignment(Alignment::Center)
-        .style(copy_public_style)
-        .block(subtle_block(theme));
+    frame.render_widget(
+        Paragraph::new(copy_public_button.label.as_str())
+            .alignment(Alignment::Center)
+            .style(button_style(
+                theme,
+                theme.info,
+                copy_public_hover,
+                copy_public_enabled,
+            ))
+            .block(subtle_block(theme)),
+        copy_public_button.area,
+    );
 
-    frame.render_widget(copy_public_widget, copy_public_button.area);
+    // Linha 5: status curto
+    let row_status = rows[4];
+    let st = status_color(theme, &app.connect_status);
 
-    // Status (chips)
     let peer_text = if let Some(label) = &app.peer_label {
         match app.peer_addr {
             Some(addr) => format!("{label} ({addr})"),
@@ -2026,25 +2243,29 @@ fn render_connection_panel(
     } else if !app.peer_input.trim().is_empty() {
         app.peer_input.trim().to_string()
     } else {
-        "none".to_string()
+        "(sem parceiro)".to_string()
     };
 
-    let st = status_color(theme, &app.connect_status);
-
     let status_line = Line::from(vec![
-        Span::styled("local ", Style::default().fg(theme.muted)),
-        Span::styled(app.bind_addr.to_string(), Style::default().fg(theme.text)),
-        Span::styled("   ", Style::default().fg(theme.muted)),
+        Span::styled("porta ", Style::default().fg(theme.muted)),
+        Span::styled(app.bind_addr.port().to_string(), title_style(theme)),
+        Span::raw("   "),
         Span::styled("parceiro ", Style::default().fg(theme.muted)),
         Span::styled(peer_text, Style::default().fg(theme.text)),
-        Span::styled("   ", Style::default().fg(theme.muted)),
+        Span::raw("   "),
         chip(theme, &app.connect_status.label(), st),
     ]);
 
-    let status = Paragraph::new(status_line).block(block_with_title(theme, "status"));
-    frame.render_widget(status, row_status);
+    frame.render_widget(
+        Paragraph::new(status_line)
+            .block(block_with_title(theme, "status"))
+            .style(Style::default().bg(theme.panel)),
+        row_status,
+    );
 
+    // Linha 6: assistente
     let row_assist = rows[5];
+
     let detected_v4 = app
         .local_ip
         .v4
@@ -2055,12 +2276,13 @@ fn render_connection_panel(
         .v6
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| "nenhum".to_string());
+
     let detected_line = Line::from(vec![
         Span::styled("v4 ", Style::default().fg(theme.muted)),
-        Span::styled(format!("{detected_v4}"), Style::default().fg(theme.text)),
+        Span::styled(detected_v4, Style::default().fg(theme.text)),
         Span::styled(" · ", Style::default().fg(theme.muted)),
         Span::styled("v6 ", Style::default().fg(theme.muted)),
-        Span::styled(format!("{detected_v6}"), Style::default().fg(theme.text)),
+        Span::styled(detected_v6, Style::default().fg(theme.text)),
         Span::styled(" · ", Style::default().fg(theme.muted)),
         Span::styled(
             format!("UDP {}", app.bind_addr.port()),
@@ -2071,18 +2293,18 @@ fn render_connection_panel(
     let assist_line = Line::from(vec![
         Span::styled("Ajuda: ", Style::default().fg(theme.muted)),
         Span::styled(nat_tip_text(app), Style::default().fg(theme.text)),
-        Span::raw(" "),
-        Span::styled("•", Style::default().fg(theme.muted)),
-        Span::raw(" "),
+        Span::raw("  •  "),
         Span::styled(probe_summary(app), Style::default().fg(theme.text)),
     ]);
 
-    let assistant = Paragraph::new(vec![detected_line, assist_line])
-        .block(block_with_title(theme, "assistente de rede"))
-        .style(Style::default().bg(theme.panel));
+    frame.render_widget(
+        Paragraph::new(vec![detected_line, assist_line])
+            .block(block_with_title(theme, "assistente de rede"))
+            .style(Style::default().bg(theme.panel)),
+        row_assist,
+    );
 
-    frame.render_widget(assistant, row_assist);
-
+    // Lista completa de botões “clicáveis”
     let buttons = vec![
         ipv4_button,
         ipv6_button,
@@ -2093,10 +2315,42 @@ fn render_connection_panel(
         copy_button,
         copy_public_button,
     ];
+
     (row_top[0], buttons)
 }
 
-fn render_buttons(frame: &mut Frame, area: Rect, app: &AppState, theme: Theme) -> Vec<Button> {
+fn render_small_ui_button(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    hover: Option<(u16, u16)>,
+    theme: Theme,
+) -> Rect {
+    let is_hover = hover
+        .map(|(x, y)| point_in_rect(x, y, area))
+        .unwrap_or(false);
+
+    let style = button_style(theme, theme.accent, is_hover, true);
+    frame.render_widget(
+        Paragraph::new(label)
+            .alignment(Alignment::Center)
+            .style(style)
+            .block(subtle_block(theme)),
+        area,
+    );
+    area
+}
+
+// -------------------------------
+// Footer (ações de arquivos) — MAIS botões, sempre visíveis
+// -------------------------------
+
+fn render_footer_buttons(
+    frame: &mut Frame,
+    area: Rect,
+    app: &AppState,
+    theme: Theme,
+) -> Vec<Button> {
     let row = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -2151,7 +2405,6 @@ fn render_buttons(frame: &mut Frame, area: Rect, app: &AppState, theme: Theme) -
         };
 
         let style = if matches!(button.action, ButtonAction::Quit) {
-            // Quit: hover bem claro
             if is_hover {
                 Style::default()
                     .fg(theme.bg)
@@ -2167,16 +2420,21 @@ fn render_buttons(frame: &mut Frame, area: Rect, app: &AppState, theme: Theme) -
             button_style(theme, accent, is_hover, enabled)
         };
 
-        let widget = Paragraph::new(button.label.as_str())
-            .alignment(Alignment::Center)
-            .style(style)
-            .block(subtle_block(theme));
-
-        frame.render_widget(widget, button.area);
+        frame.render_widget(
+            Paragraph::new(button.label.as_str())
+                .alignment(Alignment::Center)
+                .style(style)
+                .block(subtle_block(theme)),
+            button.area,
+        );
     }
 
     buttons
 }
+
+// -------------------------------
+// Geometry + received buttons
+// -------------------------------
 
 fn point_in_rect(x: u16, y: u16, rect: Rect) -> bool {
     x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
@@ -2296,6 +2554,10 @@ fn truncate_keep_end(text: &str, max: usize) -> String {
     format!("...{tail}")
 }
 
+// -------------------------------
+// OS integration
+// -------------------------------
+
 fn open_path_in_default_app(path: &std::path::Path) -> io::Result<()> {
     #[cfg(target_os = "windows")]
     {
@@ -2347,15 +2609,22 @@ fn pick_files_dialog(mouse_capture_enabled: bool) -> Option<Vec<PathBuf>> {
     let _ = disable_raw_mode();
     let mut stdout = io::stdout();
     let _ = execute!(stdout, LeaveAlternateScreen, DisableMouseCapture);
+
     let files = rfd::FileDialog::new().pick_files();
+
     if mouse_capture_enabled {
         let _ = execute!(stdout, EnterAlternateScreen, EnableMouseCapture);
     } else {
         let _ = execute!(stdout, EnterAlternateScreen, DisableMouseCapture);
     }
+
     let _ = enable_raw_mode();
     files
 }
+
+// -------------------------------
+// Local IP detection
+// -------------------------------
 
 fn detect_local_ips(preferred: IpAddr) -> LocalIps {
     let interfaces = match get_if_addrs() {

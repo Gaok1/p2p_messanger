@@ -1,37 +1,15 @@
+
 use std::{
-    fs::OpenOptions,
-    io::{self, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
-    sync::mpsc::Receiver,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
-use arboard::Clipboard;
-use crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
-        MouseEvent, MouseEventKind,
-    },
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
-use get_if_addrs::{IfAddr, get_if_addrs};
-use ratatui::{
-    Frame, Terminal,
-    backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, Paragraph},
-};
+use ratatui::layout::Rect;
+use ratatui::style::Color;
 
-use tokio::sync::mpsc as tokio_mpsc;
-
-use super::components::{
-    Button, ButtonAction, ClickTarget, ReceivedClickAction, ReceivedClickTarget,
-};
 use super::{append_log_to_file, detect_local_ips, format_log_line, infer_log_level};
+use super::components::{Button, ReceivedClickTarget, ClickTarget};
 
 pub const MAX_PEER_INPUT: usize = 120;
 pub const MAX_LOGS: usize = 200;
@@ -83,6 +61,35 @@ pub enum LogLevelFilter {
     Error,
 }
 
+impl LogLevelFilter {
+    pub fn next(self) -> Self {
+        match self {
+            LogLevelFilter::All => LogLevelFilter::Info,
+            LogLevelFilter::Info => LogLevelFilter::Warn,
+            LogLevelFilter::Warn => LogLevelFilter::Error,
+            LogLevelFilter::Error => LogLevelFilter::All,
+        }
+    }
+
+    pub fn matches(self, level: LogLevel) -> bool {
+        match self {
+            LogLevelFilter::All => true,
+            LogLevelFilter::Info => matches!(level, LogLevel::Info),
+            LogLevelFilter::Warn => matches!(level, LogLevel::Warn),
+            LogLevelFilter::Error => matches!(level, LogLevel::Error),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            LogLevelFilter::All => "todos",
+            LogLevelFilter::Info => "info",
+            LogLevelFilter::Warn => "warn",
+            LogLevelFilter::Error => "erro",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HistoryFilter {
     All,
@@ -110,35 +117,6 @@ impl HistoryFilter {
             HistoryFilter::Large => "grandes",
             HistoryFilter::Media => "midia",
             HistoryFilter::Docs => "docs",
-        }
-    }
-}
-
-impl LogLevelFilter {
-    pub fn next(self) -> Self {
-        match self {
-            LogLevelFilter::All => LogLevelFilter::Info,
-            LogLevelFilter::Info => LogLevelFilter::Warn,
-            LogLevelFilter::Warn => LogLevelFilter::Error,
-            LogLevelFilter::Error => LogLevelFilter::All,
-        }
-    }
-
-    pub fn matches(self, level: LogLevel) -> bool {
-        match self {
-            LogLevelFilter::All => true,
-            LogLevelFilter::Info => matches!(level, LogLevel::Info),
-            LogLevelFilter::Warn => matches!(level, LogLevel::Warn),
-            LogLevelFilter::Error => matches!(level, LogLevel::Error),
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            LogLevelFilter::All => "todos",
-            LogLevelFilter::Info => "info",
-            LogLevelFilter::Warn => "warn",
-            LogLevelFilter::Error => "erro",
         }
     }
 }
@@ -197,27 +175,6 @@ pub enum ConnectStatus {
     Timeout(SocketAddr),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DownloadKind {
-    Document,
-    Media,
-    Archive,
-    Binary,
-    Other,
-}
-
-impl DownloadKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            DownloadKind::Document => "doc",
-            DownloadKind::Media => "midia",
-            DownloadKind::Archive => "pacote",
-            DownloadKind::Binary => "binario",
-            DownloadKind::Other => "outro",
-        }
-    }
-}
-
 impl ConnectStatus {
     pub fn label(&self) -> String {
         match self {
@@ -262,6 +219,27 @@ pub struct DownloadEntry {
     pub size: u64,
     pub modified: Option<std::time::SystemTime>,
     pub kind: DownloadKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownloadKind {
+    Document,
+    Media,
+    Archive,
+    Binary,
+    Other,
+}
+
+impl DownloadKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            DownloadKind::Document => "doc",
+            DownloadKind::Media => "midia",
+            DownloadKind::Archive => "pacote",
+            DownloadKind::Binary => "binario",
+            DownloadKind::Other => "outro",
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -327,14 +305,13 @@ pub struct Theme {
 
 impl Theme {
     pub fn default_dark() -> Self {
-        // Paleta curta e consistente (RGB) pra ficar “aesthetic” sem poluir.
         Self {
             bg: Color::Rgb(12, 14, 18),
             panel: Color::Rgb(18, 21, 27),
             border: Color::Rgb(45, 52, 65),
             text: Color::Rgb(230, 233, 240),
             muted: Color::Rgb(150, 158, 172),
-            accent: Color::Rgb(99, 179, 237), // azul/ciano elegante
+            accent: Color::Rgb(99, 179, 237),
             info: Color::Rgb(130, 170, 255),
             ok: Color::Rgb(120, 210, 160),
             warn: Color::Rgb(240, 200, 120),
@@ -349,20 +326,28 @@ pub struct AppState {
     pub peer_label: Option<String>,
     pub peer_input: String,
     pub peer_focus: bool,
+
     pub active_tab: ActiveTab,
     pub mode: IpMode,
+
     pub connect_status: ConnectStatus,
     pub probe_status: Option<ProbeStatus>,
+
     pub local_ip: LocalIps,
     pub public_endpoint: Option<SocketAddr>,
     pub stun_status: Option<String>,
+
     pub mouse_capture_enabled: bool,
     pub mouse_capture_request: Option<bool>,
-    pub local_panel_area: Rect,
-    pub public_panel_area: Rect,
+
+    // áreas
     pub received_click_targets: Vec<ReceivedClickTarget>,
+    pub tab_click_targets: Vec<super::TabClickTarget>,
+    pub ui_click_targets: Vec<super::UiClickTarget>,
+
     pub selected: Vec<OutgoingEntry>,
     pub received: Vec<IncomingEntry>,
+
     pub logs: Vec<LogEntry>,
     pub log_filter: LogLevelFilter,
     pub log_query: String,
@@ -371,6 +356,7 @@ pub struct AppState {
     pub logs_scroll: usize,
     pub logs_view_height: usize,
     pub logs_area: Rect,
+
     pub history_area: Rect,
     pub history_view_height: usize,
     pub history_scroll: usize,
@@ -380,50 +366,54 @@ pub struct AppState {
     pub history_query_lower: String,
     pub history_search_focus: bool,
     pub history_status: Option<String>,
+
+    // botões
     pub buttons: Vec<Button>,
     pub peer_input_area: Rect,
     pub last_mouse: Option<(u16, u16)>,
+
     pub needs_clear: bool,
     pub should_quit: bool,
 }
 
 impl AppState {
-    pub fn new(
-        bind_addr: SocketAddr,
-        peer_addr: Option<SocketAddr>,
-        peer_label: Option<String>,
-    ) -> Self {
+    pub fn new(bind_addr: SocketAddr, peer_addr: Option<SocketAddr>, peer_label: Option<String>) -> Self {
         let (peer_addr, peer_input, connect_status) = match peer_addr {
             Some(addr) => (None, addr.to_string(), ConnectStatus::Connecting(addr)),
             None => (None, String::new(), ConnectStatus::Idle),
         };
+
         let local_ip = detect_local_ips(bind_addr.ip());
-        let mode = if bind_addr.is_ipv4() {
-            IpMode::Ipv4
-        } else {
-            IpMode::Ipv6
-        };
+        let mode = if bind_addr.is_ipv4() { IpMode::Ipv4 } else { IpMode::Ipv6 };
         let mode = mode.fallback(local_ip.has_v4(), local_ip.has_v6());
+
         let mut app = Self {
             bind_addr,
             peer_addr,
             peer_label,
             peer_input,
             peer_focus: false,
+
             active_tab: ActiveTab::Transfers,
             mode,
+
             connect_status,
             probe_status: None,
+
             local_ip,
             public_endpoint: None,
             stun_status: None,
+
             mouse_capture_enabled: true,
             mouse_capture_request: None,
-            local_panel_area: Rect::default(),
-            public_panel_area: Rect::default(),
+
             received_click_targets: Vec::new(),
+            tab_click_targets: Vec::new(),
+            ui_click_targets: Vec::new(),
+
             selected: Vec::new(),
             received: Vec::new(),
+
             logs: Vec::new(),
             log_filter: LogLevelFilter::All,
             log_query: String::new(),
@@ -432,6 +422,7 @@ impl AppState {
             logs_scroll: 0,
             logs_view_height: 0,
             logs_area: Rect::default(),
+
             history_area: Rect::default(),
             history_view_height: 0,
             history_scroll: 0,
@@ -441,15 +432,31 @@ impl AppState {
             history_query_lower: String::new(),
             history_search_focus: false,
             history_status: None,
+
             buttons: Vec::new(),
             peer_input_area: Rect::default(),
             last_mouse: None,
+
             needs_clear: false,
             should_quit: false,
         };
 
         app.refresh_history();
         app
+    }
+
+    pub fn clear_focus(&mut self) {
+        self.peer_focus = false;
+        self.log_search_focus = false;
+        self.history_search_focus = false;
+    }
+
+    pub fn set_active_tab(&mut self, tab: ActiveTab) {
+        if self.active_tab != tab {
+            self.active_tab = tab;
+            self.clear_focus();
+            self.needs_clear = true;
+        }
     }
 
     pub fn refresh_history(&mut self) {
@@ -532,6 +539,7 @@ impl AppState {
         let message = message.into();
         let formatted = format_log_line(level, &message);
         let was_at_bottom = self.logs_scroll == self.max_logs_scroll();
+
         self.logs.push(LogEntry { level, message });
         if self.logs.len() > MAX_LOGS {
             let excess = self.logs.len() - MAX_LOGS;
@@ -547,8 +555,7 @@ impl AppState {
     }
 
     pub fn max_logs_scroll(&self) -> usize {
-        self.visible_logs_len()
-            .saturating_sub(self.logs_view_height)
+        self.visible_logs_len().saturating_sub(self.logs_view_height)
     }
 
     pub fn set_logs_view_height(&mut self, height: usize) {
@@ -585,17 +592,11 @@ impl AppState {
     }
 
     pub fn visible_logs_len(&self) -> usize {
-        self.logs
-            .iter()
-            .filter(|entry| self.log_matches(entry))
-            .count()
+        self.logs.iter().filter(|entry| self.log_matches(entry)).count()
     }
 
     pub fn visible_logs(&self) -> Vec<&LogEntry> {
-        self.logs
-            .iter()
-            .filter(|entry| self.log_matches(entry))
-            .collect()
+        self.logs.iter().filter(|entry| self.log_matches(entry)).collect()
     }
 
     pub fn log_matches(&self, entry: &LogEntry) -> bool {
@@ -647,9 +648,7 @@ impl AppState {
     }
 
     pub fn max_history_scroll(&self) -> usize {
-        self.filtered_history()
-            .len()
-            .saturating_sub(self.history_view_height)
+        self.filtered_history().len().saturating_sub(self.history_view_height)
     }
 
     pub fn set_history_view_height(&mut self, height: usize) {
@@ -714,12 +713,11 @@ impl AppState {
     }
 
     pub fn current_public_endpoint(&self) -> Option<SocketAddr> {
-        self.public_endpoint
-            .and_then(|endpoint| match (self.mode, endpoint) {
-                (IpMode::Ipv4, SocketAddr::V4(_)) => Some(endpoint),
-                (IpMode::Ipv6, SocketAddr::V6(_)) => Some(endpoint),
-                _ => None,
-            })
+        self.public_endpoint.and_then(|endpoint| match (self.mode, endpoint) {
+            (IpMode::Ipv4, SocketAddr::V4(_)) => Some(endpoint),
+            (IpMode::Ipv6, SocketAddr::V6(_)) => Some(endpoint),
+            _ => None,
+        })
     }
 }
 
@@ -730,15 +728,9 @@ fn classify_download(path: &PathBuf) -> DownloadKind {
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    if matches!(
-        ext.as_str(),
-        "mp3" | "flac" | "wav" | "mp4" | "mkv" | "mov" | "avi"
-    ) {
+    if matches!(ext.as_str(), "mp3" | "flac" | "wav" | "mp4" | "mkv" | "mov" | "avi") {
         DownloadKind::Media
-    } else if matches!(
-        ext.as_str(),
-        "pdf" | "doc" | "docx" | "txt" | "md" | "ppt" | "pptx"
-    ) {
+    } else if matches!(ext.as_str(), "pdf" | "doc" | "docx" | "txt" | "md" | "ppt" | "pptx") {
         DownloadKind::Document
     } else if matches!(ext.as_str(), "zip" | "tar" | "gz" | "xz" | "7z" | "rar") {
         DownloadKind::Archive
