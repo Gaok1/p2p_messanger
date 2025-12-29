@@ -42,6 +42,23 @@ pub const RECEIVED_FOLDER_BUTTON_TEXT: &str = " Pasta ";
 pub const LOG_FILE_PATH: &str = "p2p_logs.txt";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActiveTab {
+    Transfers,
+    Downloads,
+    Events,
+}
+
+impl ActiveTab {
+    pub fn next(self) -> Self {
+        match self {
+            ActiveTab::Transfers => ActiveTab::Downloads,
+            ActiveTab::Downloads => ActiveTab::Events,
+            ActiveTab::Events => ActiveTab::Transfers,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LogLevel {
     Info,
     Warn,
@@ -64,6 +81,37 @@ pub enum LogLevelFilter {
     Info,
     Warn,
     Error,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryFilter {
+    All,
+    Recent,
+    Large,
+    Media,
+    Docs,
+}
+
+impl HistoryFilter {
+    pub fn next(self) -> Self {
+        match self {
+            HistoryFilter::All => HistoryFilter::Recent,
+            HistoryFilter::Recent => HistoryFilter::Large,
+            HistoryFilter::Large => HistoryFilter::Media,
+            HistoryFilter::Media => HistoryFilter::Docs,
+            HistoryFilter::Docs => HistoryFilter::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            HistoryFilter::All => "todos",
+            HistoryFilter::Recent => "recentes",
+            HistoryFilter::Large => "grandes",
+            HistoryFilter::Media => "midia",
+            HistoryFilter::Docs => "docs",
+        }
+    }
 }
 
 impl LogLevelFilter {
@@ -149,6 +197,27 @@ pub enum ConnectStatus {
     Timeout(SocketAddr),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DownloadKind {
+    Document,
+    Media,
+    Archive,
+    Binary,
+    Other,
+}
+
+impl DownloadKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            DownloadKind::Document => "doc",
+            DownloadKind::Media => "midia",
+            DownloadKind::Archive => "pacote",
+            DownloadKind::Binary => "binario",
+            DownloadKind::Other => "outro",
+        }
+    }
+}
+
 impl ConnectStatus {
     pub fn label(&self) -> String {
         match self {
@@ -184,6 +253,15 @@ pub struct OutgoingEntry {
     pub rate_last_at: Option<Instant>,
     pub rate_last_bytes: u64,
     pub status: OutgoingStatus,
+}
+
+#[derive(Clone)]
+pub struct DownloadEntry {
+    pub path: PathBuf,
+    pub name: String,
+    pub size: u64,
+    pub modified: Option<std::time::SystemTime>,
+    pub kind: DownloadKind,
 }
 
 #[derive(Clone, Copy)]
@@ -271,6 +349,7 @@ pub struct AppState {
     pub peer_label: Option<String>,
     pub peer_input: String,
     pub peer_focus: bool,
+    pub active_tab: ActiveTab,
     pub mode: IpMode,
     pub connect_status: ConnectStatus,
     pub probe_status: Option<ProbeStatus>,
@@ -292,6 +371,15 @@ pub struct AppState {
     pub logs_scroll: usize,
     pub logs_view_height: usize,
     pub logs_area: Rect,
+    pub history_area: Rect,
+    pub history_view_height: usize,
+    pub history_scroll: usize,
+    pub history_entries: Vec<DownloadEntry>,
+    pub history_filter: HistoryFilter,
+    pub history_query: String,
+    pub history_query_lower: String,
+    pub history_search_focus: bool,
+    pub history_status: Option<String>,
     pub buttons: Vec<Button>,
     pub peer_input_area: Rect,
     pub last_mouse: Option<(u16, u16)>,
@@ -316,12 +404,13 @@ impl AppState {
             IpMode::Ipv6
         };
         let mode = mode.fallback(local_ip.has_v4(), local_ip.has_v6());
-        Self {
+        let mut app = Self {
             bind_addr,
             peer_addr,
             peer_label,
             peer_input,
             peer_focus: false,
+            active_tab: ActiveTab::Transfers,
             mode,
             connect_status,
             probe_status: None,
@@ -343,12 +432,94 @@ impl AppState {
             logs_scroll: 0,
             logs_view_height: 0,
             logs_area: Rect::default(),
+            history_area: Rect::default(),
+            history_view_height: 0,
+            history_scroll: 0,
+            history_entries: Vec::new(),
+            history_filter: HistoryFilter::All,
+            history_query: String::new(),
+            history_query_lower: String::new(),
+            history_search_focus: false,
+            history_status: None,
             buttons: Vec::new(),
             peer_input_area: Rect::default(),
             last_mouse: None,
             needs_clear: false,
             should_quit: false,
+        };
+
+        app.refresh_history();
+        app
+    }
+
+    pub fn refresh_history(&mut self) {
+        let received_dir = std::path::PathBuf::from("received");
+        if !received_dir.exists() {
+            self.history_entries.clear();
+            self.history_status = Some("pasta 'received' não encontrada".to_string());
+            return;
         }
+
+        let mut entries = Vec::new();
+        let mut status = None;
+        match std::fs::read_dir(&received_dir) {
+            Ok(reader) => {
+                for item in reader.flatten() {
+                    let path = item.path();
+                    if path.is_dir() {
+                        continue;
+                    }
+                    let name = path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let metadata = path.metadata().ok();
+                    let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                    let modified = metadata.and_then(|m| m.modified().ok());
+                    let kind = classify_download(&path);
+                    entries.push(DownloadEntry {
+                        path,
+                        name,
+                        size,
+                        modified,
+                        kind,
+                    });
+                }
+                entries.sort_by(|a, b| b.modified.cmp(&a.modified));
+            }
+            Err(err) => {
+                status = Some(format!("erro ao ler 'received': {err}"));
+            }
+        }
+
+        self.history_entries = entries;
+        self.history_status = status;
+        self.history_scroll = 0;
+    }
+
+    pub fn push_history_entry(&mut self, path: PathBuf) {
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let metadata = path.metadata().ok();
+        let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+        let modified = metadata.and_then(|m| m.modified().ok());
+        let kind = classify_download(&path);
+
+        self.history_entries.retain(|entry| entry.path != path);
+        self.history_entries.insert(
+            0,
+            DownloadEntry {
+                path,
+                name,
+                size,
+                modified,
+                kind,
+            },
+        );
     }
 
     pub fn push_log(&mut self, message: impl Into<String>) {
@@ -436,6 +607,64 @@ impl AppState {
                     .contains(&self.log_query_lower))
     }
 
+    pub fn filtered_history(&self) -> Vec<&DownloadEntry> {
+        let now = std::time::SystemTime::now();
+        let recent_cutoff = now
+            .checked_sub(std::time::Duration::from_secs(60 * 60 * 24 * 7))
+            .unwrap_or(now);
+
+        self.history_entries
+            .iter()
+            .filter(|entry| {
+                let matches_query = self.history_query_lower.is_empty()
+                    || entry
+                        .name
+                        .to_ascii_lowercase()
+                        .contains(&self.history_query_lower);
+
+                let matches_filter = match self.history_filter {
+                    HistoryFilter::All => true,
+                    HistoryFilter::Recent => entry.modified.is_some_and(|m| m >= recent_cutoff),
+                    HistoryFilter::Large => entry.size >= 50 * 1_000_000,
+                    HistoryFilter::Media => matches!(entry.kind, DownloadKind::Media),
+                    HistoryFilter::Docs => matches!(entry.kind, DownloadKind::Document),
+                };
+
+                matches_query && matches_filter
+            })
+            .collect()
+    }
+
+    pub fn set_history_query(&mut self, query: String) {
+        self.history_query = query;
+        self.history_query_lower = self.history_query.to_ascii_lowercase();
+        self.history_scroll = self.history_scroll.min(self.max_history_scroll());
+    }
+
+    pub fn cycle_history_filter(&mut self) {
+        self.history_filter = self.history_filter.next();
+        self.history_scroll = self.history_scroll.min(self.max_history_scroll());
+    }
+
+    pub fn max_history_scroll(&self) -> usize {
+        self.filtered_history()
+            .len()
+            .saturating_sub(self.history_view_height)
+    }
+
+    pub fn set_history_view_height(&mut self, height: usize) {
+        self.history_view_height = height;
+        self.history_scroll = self.history_scroll.min(self.max_history_scroll());
+    }
+
+    pub fn scroll_history_up(&mut self, lines: usize) {
+        self.history_scroll = self.history_scroll.saturating_sub(lines);
+    }
+
+    pub fn scroll_history_down(&mut self, lines: usize) {
+        self.history_scroll = (self.history_scroll + lines).min(self.max_history_scroll());
+    }
+
     pub fn scroll_logs_up(&mut self, lines: usize) {
         self.logs_scroll = self.logs_scroll.saturating_sub(lines);
     }
@@ -473,6 +702,13 @@ impl AppState {
         }
     }
 
+    pub fn mode_label(&self) -> &'static str {
+        match self.mode {
+            IpMode::Ipv4 => "IPv4",
+            IpMode::Ipv6 => "IPv6",
+        }
+    }
+
     pub fn current_local_ip(&self) -> Option<IpAddr> {
         self.local_ip.current_for_mode(self.mode)
     }
@@ -484,5 +720,31 @@ impl AppState {
                 (IpMode::Ipv6, SocketAddr::V6(_)) => Some(endpoint),
                 _ => None,
             })
+    }
+}
+
+fn classify_download(path: &PathBuf) -> DownloadKind {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    if matches!(
+        ext.as_str(),
+        "mp3" | "flac" | "wav" | "mp4" | "mkv" | "mov" | "avi"
+    ) {
+        DownloadKind::Media
+    } else if matches!(
+        ext.as_str(),
+        "pdf" | "doc" | "docx" | "txt" | "md" | "ppt" | "pptx"
+    ) {
+        DownloadKind::Document
+    } else if matches!(ext.as_str(), "zip" | "tar" | "gz" | "xz" | "7z" | "rar") {
+        DownloadKind::Archive
+    } else if matches!(ext.as_str(), "exe" | "msi" | "apk" | "bin" | "appimage") {
+        DownloadKind::Binary
+    } else {
+        DownloadKind::Other
     }
 }
