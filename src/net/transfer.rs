@@ -6,7 +6,6 @@ use std::{
     sync::mpsc::Sender,
 };
 
-use chrono::Local;
 use quinn::{ReadError, RecvStream, VarInt};
 use tokio::{
     fs::File,
@@ -109,6 +108,7 @@ pub(crate) async fn handle_incoming_stream(
     file_id: u64,
     name: String,
     size: u64,
+    from: SocketAddr,
     mut stream: RecvStream,
     session_dir: &mut Option<PathBuf>,
     incoming: &mut HashMap<u64, IncomingTransfer>,
@@ -117,7 +117,7 @@ pub(crate) async fn handle_incoming_stream(
 ) -> io::Result<()> {
     let dir = ensure_session_dir(session_dir, evt_tx).await?;
     let safe_name = sanitize_file_name(&name);
-    let path = dir.join(safe_name);
+    let path = unique_download_path(&dir, &safe_name).await;
     let file = File::create(&path).await?;
 
     let _ = evt_tx.send(NetEvent::ReceiveStarted {
@@ -159,6 +159,7 @@ pub(crate) async fn handle_incoming_stream(
                         let _ = evt_tx.send(NetEvent::FileReceived {
                             file_id,
                             path: task_path.clone(),
+                            from,
                         });
                     } else {
                         let _ = evt_tx.send(NetEvent::Log(format!(
@@ -201,8 +202,7 @@ pub(crate) async fn ensure_session_dir(
         return Ok(dir);
     }
 
-    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-    let dir = std::env::current_dir()?.join("received").join(timestamp);
+    let dir = std::env::current_dir()?.join("received");
     tokio::fs::create_dir_all(&dir).await?;
     *session_dir = Some(dir.clone());
     let _ = evt_tx.send(NetEvent::SessionDir(dir.clone()));
@@ -216,6 +216,34 @@ fn sanitize_file_name(name: &str) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("file.bin")
         .to_string()
+}
+
+async fn unique_download_path(dir: &Path, file_name: &str) -> PathBuf {
+    let mut candidate = dir.join(file_name);
+    if !tokio::fs::try_exists(&candidate).await.unwrap_or(false) {
+        return candidate;
+    }
+
+    let base = Path::new(file_name);
+    let stem = base
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("file");
+    let ext = base.extension().and_then(|value| value.to_str());
+
+    for idx in 2..=9999_u32 {
+        let next_name = match ext {
+            Some(ext) => format!("{stem} ({idx}).{ext}"),
+            None => format!("{stem} ({idx})"),
+        };
+        candidate = dir.join(next_name);
+        if !tokio::fs::try_exists(&candidate).await.unwrap_or(false) {
+            return candidate;
+        }
+    }
+
+    candidate
 }
 
 /// Envia um pacote de controle confiável para o par.

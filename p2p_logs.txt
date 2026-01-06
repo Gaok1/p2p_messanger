@@ -558,3 +558,143 @@ endpoint publico [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:62868
 [INFO] transporte QUIC: streams confiaveis com TLS 1.3
 [INFO] dados de arquivo: streams unidirecionais com chunks de 65536 bytes
 [INFO] endpoint publico [2804:d45:9a05:f400:4139:ddac:8dc1:8af5]:58614
+[INFO] transporte QUIC: streams confiaveis com TLS 1.3
+[INFO] dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+[INFO] endpoint publico [2804:d45:9a05:f400:75ef:2671:3424:eff0]:54671
+[INFO] reconfigurando bind para 0.0.0.0:54671
+[INFO] endpoint publico 152.237.164.251:61017
+[INFO] reconfigurando bind para [::]:54671
+[INFO] endpoint publico [2804:d45:9a05:f400:75ef:2671:3424:eff0]:54671
+[INFO] mouse livre: selecione texto no terminal (pressione 'm' para voltar aos cliques)
+[INFO] mouse capturado: cliques habilitados (botões funcionam)
+[INFO] reconfigurando bind para 0.0.0.0:54671
+[INFO] endpoint publico 152.237.164.251:61017
+[INFO] reconfigurando bind para [::]:54671
+[INFO] endpoint publico [2804:d45:9a05:f400:75ef:2671:3424:eff0]:54671
+[INFO] reconfigurando bind para 0.0.0.0:54671
+[INFO] endpoint publico 152.237.164.251:61017
+[INFO] reconfigurando bind para [::]:54671
+[INFO] endpoint publico [2804:d45:9a05:f400:75ef:2671:3424:eff0]:54671
+[INFO] transporte QUIC: streams confiaveis com TLS 1.3
+[INFO] dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+[INFO] endpoint publico [2804:d45:9a05:f400:75ef:2671:3424:eff0]:63671
+[INFO] reconfigurando bind para 0.0.0.0:63671
+[INFO] endpoint publico 152.237.164.251:58449
+[INFO] transporte QUIC: streams confiaveis com TLS 1.3
+[INFO] dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+[INFO] endpoint publico [2804:d45:9a05:f400:75ef:2671:3424:eff0]:50061
+[INFO] reconfigurando bind para 0.0.0.0:50061
+[INFO] endpoint publico 152.237.164.251:59015
+[INFO] reconfigurando bind para [::]:50061
+[INFO] endpoint publico [2804:d45:9a05:f400:75ef:2671:3424:eff0]:50061
+[INFO] reconfigurando bind para 0.0.0.0:50061
+[INFO] endpoint publico 152.237.164.251:59015
+[INFO] transporte QUIC: streams confiaveis com TLS 1.3
+[INFO] dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+[INFO] endpoint publico [2804:d45:9a05:f400:75ef:2671:3424:eff0]:54584
+[INFO] copiado [2804:d45:9a05:f400:adc3:9cad:a63c:aa59]:54584
+[INFO] copiado [2804:d45:9a05:f400:75ef:2671:3424:eff0]:54584
+[INFO] reconfigurando bind para 0.0.0.0:54584
+[INFO] endpoint publico 152.237.164.251:59596
+[INFO] ip colado
+[INFO] conectando 152.237.164.251:59099
+[INFO] conectado 152.237.164.251:59099
+[INFO] pasta de downloads C:\Users\gaok1\Documents\GitHub\p2p_messanger\received
+[INFO] autotune inflight: min_rtt=8.95ms srtt=8.95ms rate=0.01 Mbps bdp=77 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=8.09ms srtt=8.09ms rate=0.01 Mbps bdp=51 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=8.09ms srtt=8.09ms rate=0.01 Mbps bdp=41 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=8.09ms srtt=8.71ms rate=0.00 Mbps bdp=30 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=8.09ms srtt=8.62ms rate=0.00 Mbps bdp=22 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=8.09ms srtt=8.62ms rate=0.00 Mbps bdp=16 B target=256.0 KiB
+[INFO] recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\Trabalho Interdisciplinar V_ Sistemas Computacionais - Ciência da Computação - Campus Lourdes - PLU - Manhã - 2025_1.pdf
+[INFO] recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\Trabalho Interdisciplinar V_ Sistemas Computacionais - Ciência da Computação - Campus Lourdes - PLU - Manhã - 2025_1.pdf
+[INFO] autotune inflight: min_rtt=6.01ms srtt=6.01ms rate=0.01 Mbps bdp=31 B target=256.0 KiB
+[INFO] enviado C:\Users\gaok1\Downloads\Trabalho Interdisciplinar V_ Sistemas Computacionais - Ciência da Computação - Campus Lourdes - PLU - Manhã - 2025_1.pdf
+[INFO] autotune inflight: min_rtt=6.01ms srtt=7.42ms rate=0.39 Mbps bdp=2.3 KiB target=256.0 KiB
+[INFO] autotune inflight: min_rtt=6.01ms srtt=7.42ms rate=0.31 Mbps bdp=1.8 KiB target=256.0 KiB
+[INFO] autotune inflight: min_rtt=6.01ms srtt=7.79ms rate=0.25 Mbps bdp=1.5 KiB target=256.0 KiB
+[INFO] autotune inflight: min_rtt=6.01ms srtt=7.14ms rate=0.19 Mbps bdp=1.1 KiB target=256.0 KiB
+[INFO] autotune inflight: min_rtt=6.01ms srtt=7.14ms rate=0.14 Mbps bdp=812 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=6.01ms srtt=7.77ms rate=0.11 Mbps bdp=658 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=6.01ms srtt=7.31ms rate=0.08 Mbps bdp=479 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=6.01ms srtt=7.31ms rate=0.06 Mbps bdp=349 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=6.01ms srtt=6.75ms rate=0.05 Mbps bdp=283 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=6.01ms srtt=6.30ms rate=0.03 Mbps bdp=206 B target=256.0 KiB
+[INFO] abrindo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\Trabalho Interdisciplinar V_ Sistemas Computacionais - Ciência da Computação - Campus Lourdes - PLU - Manhã - 2025_1.pdf
+[INFO] autotune inflight: min_rtt=6.01ms srtt=6.30ms rate=0.03 Mbps bdp=150 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=6.01ms srtt=6.09ms rate=0.02 Mbps bdp=109 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.85ms srtt=5.85ms rate=0.01 Mbps bdp=77 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.77ms srtt=5.77ms rate=0.01 Mbps bdp=55 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.77ms srtt=5.77ms rate=0.01 Mbps bdp=40 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.58ms srtt=5.58ms rate=0.01 Mbps bdp=31 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=5.51ms rate=0.00 Mbps bdp=23 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=5.51ms rate=0.00 Mbps bdp=18 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.41ms rate=0.00 Mbps bdp=13 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.04ms rate=0.00 Mbps bdp=9 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.04ms rate=0.00 Mbps bdp=8 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=5.83ms rate=0.00 Mbps bdp=5 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.64ms rate=0.00 Mbps bdp=5 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.64ms rate=0.00 Mbps bdp=4 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.55ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.55ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=7.12ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.50ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.50ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.86ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.86ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.72ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=7.24ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=7.24ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.63ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.56ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.56ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=7.03ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.58ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+[INFO] recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\teroem godel.rar
+[INFO] recebido C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\teroem godel.rar
+[INFO] autotune inflight: min_rtt=5.51ms srtt=17.43ms rate=0.13 Mbps bdp=724 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=14.51ms rate=0.11 Mbps bdp=586 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=12.70ms rate=0.08 Mbps bdp=427 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=12.70ms rate=0.06 Mbps bdp=346 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=12.34ms rate=0.05 Mbps bdp=252 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=10.85ms rate=0.03 Mbps bdp=184 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=10.85ms rate=0.03 Mbps bdp=149 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=9.97ms rate=0.02 Mbps bdp=108 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=9.97ms rate=0.02 Mbps bdp=88 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=8.80ms rate=0.01 Mbps bdp=64 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=9.00ms rate=0.01 Mbps bdp=51 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=9.00ms rate=0.01 Mbps bdp=37 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=8.15ms rate=0.01 Mbps bdp=30 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=8.46ms rate=0.00 Mbps bdp=22 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=8.46ms rate=0.00 Mbps bdp=16 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=7.48ms rate=0.00 Mbps bdp=13 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=8.12ms rate=0.00 Mbps bdp=9 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=8.12ms rate=0.00 Mbps bdp=7 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=7.48ms rate=0.00 Mbps bdp=5 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=7.48ms rate=0.00 Mbps bdp=4 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=7.06ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=7.30ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=7.30ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.59ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.59ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.40ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.28ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.28ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.77ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.50ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.50ms rate=0.00 Mbps bdp=1 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=7.13ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.82ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.82ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.39ms rate=0.00 Mbps bdp=2 B target=256.0 KiB
+[INFO] autotune inflight: min_rtt=5.51ms srtt=6.92ms rate=0.00 Mbps bdp=3 B target=256.0 KiB
+[INFO] transporte QUIC: streams confiaveis com TLS 1.3
+[INFO] dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+[INFO] endpoint publico [2804:d45:9a05:f400:75ef:2671:3424:eff0]:64189
+[INFO] reconfigurando bind para 0.0.0.0:64189
+[INFO] endpoint publico 152.237.164.251:61113
+[INFO] reconfigurando bind para [::]:64189
+[INFO] endpoint publico [2804:d45:9a05:f400:75ef:2671:3424:eff0]:64189
+[INFO] reconfigurando bind para 0.0.0.0:64189
+[INFO] endpoint publico 152.237.164.251:61113
+[INFO] abrindo pasta C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-29_11-48-55\2025-1-09-Decidibilidade.pdf

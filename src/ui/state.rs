@@ -1,12 +1,16 @@
 
 use std::{
+    collections::HashMap,
+    fs,
+    io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::Instant,
 };
 
 use ratatui::layout::Rect;
 use ratatui::style::Color;
+use serde::{Deserialize, Serialize};
 
 use super::{append_log_to_file, detect_local_ips, format_log_line, infer_log_level};
 use super::components::{Button, ReceivedClickTarget, ClickTarget};
@@ -18,6 +22,8 @@ pub const PROGRESS_BAR_WIDTH: usize = 16;
 pub const RECEIVED_OPEN_BUTTON_TEXT: &str = " Abrir ";
 pub const RECEIVED_FOLDER_BUTTON_TEXT: &str = " Pasta ";
 pub const LOG_FILE_PATH: &str = "p2p_logs.txt";
+pub const DOWNLOADS_DIR: &str = "received";
+const DOWNLOAD_META_FILE: &str = ".download_meta.json";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActiveTab {
@@ -93,6 +99,7 @@ impl LogLevelFilter {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HistoryFilter {
     All,
+    FromPeer,
     Recent,
     Large,
     Media,
@@ -102,7 +109,8 @@ pub enum HistoryFilter {
 impl HistoryFilter {
     pub fn next(self) -> Self {
         match self {
-            HistoryFilter::All => HistoryFilter::Recent,
+            HistoryFilter::All => HistoryFilter::FromPeer,
+            HistoryFilter::FromPeer => HistoryFilter::Recent,
             HistoryFilter::Recent => HistoryFilter::Large,
             HistoryFilter::Large => HistoryFilter::Media,
             HistoryFilter::Media => HistoryFilter::Docs,
@@ -113,6 +121,7 @@ impl HistoryFilter {
     pub fn label(self) -> &'static str {
         match self {
             HistoryFilter::All => "todos",
+            HistoryFilter::FromPeer => "do peer",
             HistoryFilter::Recent => "recentes",
             HistoryFilter::Large => "grandes",
             HistoryFilter::Media => "midia",
@@ -219,6 +228,7 @@ pub struct DownloadEntry {
     pub size: u64,
     pub modified: Option<std::time::SystemTime>,
     pub kind: DownloadKind,
+    pub from_peer: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -460,52 +470,74 @@ impl AppState {
     }
 
     pub fn refresh_history(&mut self) {
-        let received_dir = std::path::PathBuf::from("received");
+        let received_dir = resolve_downloads_dir();
         if !received_dir.exists() {
             self.history_entries.clear();
-            self.history_status = Some("pasta 'received' não encontrada".to_string());
+            self.history_status = Some(format!("pasta '{DOWNLOADS_DIR}' não encontrada"));
             return;
         }
 
+        let meta = load_download_meta_index(&received_dir).by_path;
         let mut entries = Vec::new();
         let mut status = None;
-        match std::fs::read_dir(&received_dir) {
-            Ok(reader) => {
-                for item in reader.flatten() {
-                    let path = item.path();
-                    if path.is_dir() {
-                        continue;
+
+        let mut stack = vec![received_dir.clone()];
+        while let Some(dir) = stack.pop() {
+            match fs::read_dir(&dir) {
+                Ok(reader) => {
+                    for item in reader.flatten() {
+                        let path = item.path();
+                        if path.is_dir() {
+                            stack.push(path);
+                            continue;
+                        }
+
+                        if is_download_meta_file(&path) {
+                            continue;
+                        }
+
+                        let name = path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let metadata = path.metadata().ok();
+                        let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                        let modified = metadata.and_then(|m| m.modified().ok());
+                        let kind = classify_download(&path);
+                        let from_peer = relative_download_key(&received_dir, &path)
+                            .and_then(|key| meta.get(&key).cloned());
+
+                        entries.push(DownloadEntry {
+                            path,
+                            name,
+                            size,
+                            modified,
+                            kind,
+                            from_peer,
+                        });
                     }
-                    let name = path
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    let metadata = path.metadata().ok();
-                    let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-                    let modified = metadata.and_then(|m| m.modified().ok());
-                    let kind = classify_download(&path);
-                    entries.push(DownloadEntry {
-                        path,
-                        name,
-                        size,
-                        modified,
-                        kind,
-                    });
                 }
-                entries.sort_by(|a, b| b.modified.cmp(&a.modified));
-            }
-            Err(err) => {
-                status = Some(format!("erro ao ler 'received': {err}"));
+                Err(err) => {
+                    status = Some(format!("erro ao ler {}: {err}", dir.display()));
+                }
             }
         }
+        entries.sort_by(|a, b| b.modified.cmp(&a.modified));
 
         self.history_entries = entries;
         self.history_status = status;
         self.history_scroll = 0;
     }
 
-    pub fn push_history_entry(&mut self, path: PathBuf) {
+    pub fn push_history_entry(&mut self, path: PathBuf, from_peer: Option<String>) {
+        if let Some(peer) = from_peer.as_deref() {
+            let downloads_dir = resolve_downloads_dir();
+            if let Err(err) = store_download_peer(&downloads_dir, &path, peer) {
+                self.push_log(format!("erro ao salvar historico de downloads: {err}"));
+            }
+        }
+
         let name = path
             .file_name()
             .and_then(|s| s.to_str())
@@ -525,6 +557,7 @@ impl AppState {
                 size,
                 modified,
                 kind,
+                from_peer,
             },
         );
     }
@@ -613,6 +646,10 @@ impl AppState {
         let recent_cutoff = now
             .checked_sub(std::time::Duration::from_secs(60 * 60 * 24 * 7))
             .unwrap_or(now);
+        let peer_key = self
+            .peer_addr
+            .map(|addr| addr.to_string())
+            .or_else(|| self.peer_input.trim().parse::<SocketAddr>().ok().map(|a| a.to_string()));
 
         self.history_entries
             .iter()
@@ -625,6 +662,9 @@ impl AppState {
 
                 let matches_filter = match self.history_filter {
                     HistoryFilter::All => true,
+                    HistoryFilter::FromPeer => peer_key
+                        .as_ref()
+                        .is_some_and(|key| entry.from_peer.as_deref() == Some(key.as_str())),
                     HistoryFilter::Recent => entry.modified.is_some_and(|m| m >= recent_cutoff),
                     HistoryFilter::Large => entry.size >= 50 * 1_000_000,
                     HistoryFilter::Media => matches!(entry.kind, DownloadKind::Media),
@@ -719,6 +759,66 @@ impl AppState {
             _ => None,
         })
     }
+}
+
+fn resolve_downloads_dir() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(DOWNLOADS_DIR)
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct DownloadMetaIndex {
+    by_path: HashMap<String, String>,
+}
+
+fn download_meta_path(downloads_dir: &Path) -> PathBuf {
+    downloads_dir.join(DOWNLOAD_META_FILE)
+}
+
+fn load_download_meta_index(downloads_dir: &Path) -> DownloadMetaIndex {
+    let path = download_meta_path(downloads_dir);
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(_) => return DownloadMetaIndex::default(),
+    };
+
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+fn save_download_meta_index(downloads_dir: &Path, index: &DownloadMetaIndex) -> io::Result<()> {
+    let path = download_meta_path(downloads_dir);
+    let tmp_path = downloads_dir.join(format!("{DOWNLOAD_META_FILE}.tmp"));
+    let json = serde_json::to_vec_pretty(index)
+        .unwrap_or_else(|_| br#"{"by_path":{}}"#.to_vec());
+
+    fs::write(&tmp_path, json)?;
+    if path.exists() {
+        let _ = fs::remove_file(&path);
+    }
+    fs::rename(tmp_path, path)?;
+    Ok(())
+}
+
+fn store_download_peer(downloads_dir: &Path, download_path: &Path, peer: &str) -> io::Result<()> {
+    let Some(key) = relative_download_key(downloads_dir, download_path) else {
+        return Ok(());
+    };
+
+    let mut index = load_download_meta_index(downloads_dir);
+    index.by_path.insert(key, peer.to_string());
+    save_download_meta_index(downloads_dir, &index)
+}
+
+fn is_download_meta_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name.starts_with(DOWNLOAD_META_FILE))
+}
+
+fn relative_download_key(downloads_dir: &Path, download_path: &Path) -> Option<String> {
+    let rel = download_path.strip_prefix(downloads_dir).ok()?;
+    Some(rel.to_string_lossy().replace('\\', "/"))
 }
 
 fn classify_download(path: &PathBuf) -> DownloadKind {

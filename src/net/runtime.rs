@@ -807,6 +807,7 @@ async fn run_network_async(
                             file_id,
                             name,
                             size,
+                            from,
                             stream,
                             &mut session_dir,
                             &mut incoming,

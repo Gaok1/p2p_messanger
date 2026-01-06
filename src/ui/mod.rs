@@ -255,7 +255,7 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
             }
             app.push_log(format!("enviado {}", path.display()));
         }
-        NetEvent::FileReceived { file_id, path } => {
+        NetEvent::FileReceived { file_id, path, from } => {
             if let Some(entry) = app
                 .received
                 .iter_mut()
@@ -267,10 +267,10 @@ fn handle_net_event(app: &mut AppState, event: NetEvent) {
                 entry.rate_started_at = None;
             }
             app.push_log(format!("recebido {}", path.display()));
-            app.push_history_entry(path);
+            app.push_history_entry(path, Some(from.to_string()));
         }
         NetEvent::SessionDir(path) => {
-            app.push_log(format!("diretorio da sessao {}", path.display()));
+            app.push_log(format!("pasta de downloads {}", path.display()));
         }
         NetEvent::SendStarted {
             file_id,
@@ -1429,13 +1429,19 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
 
     frame.render_widget(root_bg(theme), frame.size());
 
+    let footer_h = if matches!(app.active_tab, ActiveTab::Transfers) {
+        3
+    } else {
+        0
+    };
+
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(20), // header (conexão)
+            Constraint::Length(15), // header (conexão)
             Constraint::Length(3),  // tabs (clicáveis)
             Constraint::Min(10),    // conteúdo
-            Constraint::Length(4),  // footer buttons
+            Constraint::Length(footer_h), // ações (só Transferências)
         ])
         .split(frame.size());
 
@@ -1451,9 +1457,15 @@ fn draw_ui(frame: &mut Frame, app: &mut AppState) {
         ActiveTab::Events => render_events_tab(frame, outer[2], app, theme),
     }
 
+    let footer_buttons = if matches!(app.active_tab, ActiveTab::Transfers) {
+        render_transfer_action_buttons(frame, outer[3], app, theme)
+    } else {
+        Vec::new()
+    };
+
     let mut all_buttons = Vec::new();
     all_buttons.extend(header_buttons);
-    all_buttons.extend(render_footer_buttons(frame, outer[3], app, theme));
+    all_buttons.extend(footer_buttons);
     app.buttons = all_buttons;
 }
 
@@ -1517,7 +1529,18 @@ fn render_tab_bar(frame: &mut Frame, area: Rect, app: &mut AppState, theme: Them
 // Transfer tab
 // -------------------------------
 
-fn render_transfer_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme: Theme) {
+fn render_transfer_tab(
+    frame: &mut Frame,
+    area: Rect,
+    app: &mut AppState,
+    theme: Theme,
+) {
+    // A aba Eventos já mostra os eventos; aqui é só transferência.
+    app.logs_area = Rect::default();
+    app.set_logs_view_height(0);
+    app.received_click_targets = Vec::new();
+    app.ui_click_targets = Vec::new();
+
     let body = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
@@ -1535,22 +1558,18 @@ fn render_transfer_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme:
 
     frame.render_widget(selected, body[0]);
 
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
-        .split(body[1]);
-
     // Recebendo
-    let max_entries = max_received_entries_for_area(right[0]).min(24);
+    let list_area = body[1];
+    let max_entries = max_received_entries_for_area(list_area).min(24);
     let received_view = build_received_view(&app.received, max_entries);
     let mut received_items = Vec::new();
 
     for (entry_idx, entry) in received_view.iter().enumerate() {
-        received_items.push(render_incoming_info_line(theme, entry, right[0]));
+        received_items.push(render_incoming_info_line(theme, entry, list_area));
         received_items.push(render_incoming_action_line(
             theme,
             entry,
-            right[0],
+            list_area,
             entry_idx * 2 + 1,
             app.last_mouse,
         ));
@@ -1560,9 +1579,11 @@ fn render_transfer_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme:
         .block(block_with_title(theme, "recebendo (entrada)"))
         .style(Style::default().bg(theme.panel));
 
-    app.received_click_targets = build_received_click_targets(right[0], &received_view);
-    frame.render_widget(received, right[0]);
+    app.received_click_targets = build_received_click_targets(list_area, &received_view);
+    frame.render_widget(received, list_area);
 
+    #[cfg(any())]
+    {
     // Logs
     let logs_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -1661,6 +1682,8 @@ fn render_transfer_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme:
         .style(Style::default().bg(theme.panel));
 
     frame.render_widget(logs, logs_chunks[1]);
+    }
+
 }
 
 // -------------------------------
@@ -1668,6 +1691,8 @@ fn render_transfer_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme:
 // -------------------------------
 
 fn render_events_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme: Theme) {
+    app.received_click_targets = Vec::new();
+
     let layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
@@ -1872,7 +1897,11 @@ fn render_downloads_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme
     let window = &entries[start..end];
 
     let mut items = Vec::new();
-    for entry in window {
+    let mut history_click_targets = Vec::new();
+    let available = inner.width as usize;
+    let open_len = RECEIVED_OPEN_BUTTON_TEXT.chars().count();
+    let folder_len = RECEIVED_FOLDER_BUTTON_TEXT.chars().count();
+    for (entry_idx, entry) in window.iter().copied().enumerate() {
         let subtitle = format!(
             "{}  ·  {}  ·  {}",
             format_size(entry.size),
@@ -1880,14 +1909,71 @@ fn render_downloads_tab(frame: &mut Frame, area: Rect, app: &mut AppState, theme
             entry.kind.label()
         );
 
+        let action_row = entry_idx * item_height + 1;
+        let open_rect = received_open_button_rect(list_area, action_row);
+        let folder_rect = received_folder_button_rect(list_area, action_row);
+        let show_actions = entry.path.exists() && open_rect.width > 0 && folder_rect.width > 0;
+
+        let reserved_actions = if show_actions {
+            1 + open_len + 1 + folder_len
+        } else {
+            0
+        };
+        let subtitle_max = available.saturating_sub(reserved_actions);
+        let subtitle_display = truncate_keep_start(&subtitle, subtitle_max);
+        let filler_len =
+            available.saturating_sub(subtitle_display.chars().count() + reserved_actions);
+
+        let mut subtitle_spans = vec![Span::styled(
+            subtitle_display,
+            Style::default().fg(theme.muted),
+        )];
+
+        if show_actions {
+            let open_hover = hover.is_some_and(|(x, y)| point_in_rect(x, y, open_rect));
+            let folder_hover = hover.is_some_and(|(x, y)| point_in_rect(x, y, folder_rect));
+            let open_bg = if open_hover { theme.accent } else { theme.ok };
+            let folder_bg = if folder_hover { theme.accent } else { theme.info };
+
+            subtitle_spans.push(Span::raw(" ".repeat(filler_len)));
+            subtitle_spans.push(Span::raw(" "));
+            subtitle_spans.push(Span::styled(
+                RECEIVED_OPEN_BUTTON_TEXT,
+                Style::default()
+                    .fg(theme.bg)
+                    .bg(open_bg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            subtitle_spans.push(Span::raw(" "));
+            subtitle_spans.push(Span::styled(
+                RECEIVED_FOLDER_BUTTON_TEXT,
+                Style::default()
+                    .fg(theme.bg)
+                    .bg(folder_bg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+
+            history_click_targets.push(ReceivedClickTarget {
+                area: open_rect,
+                path: entry.path.clone(),
+                action: ReceivedClickAction::Open,
+            });
+            history_click_targets.push(ReceivedClickTarget {
+                area: folder_rect,
+                path: entry.path.clone(),
+                action: ReceivedClickAction::RevealInFolder,
+            });
+        }
+
         items.push(ListItem::new(vec![
             Line::from(Span::styled(
-                truncate_keep_end(&entry.name, inner.width as usize - 4),
+                truncate_keep_end(&entry.name, (inner.width as usize).saturating_sub(4)),
                 Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
             )),
-            Line::from(Span::styled(subtitle, Style::default().fg(theme.muted))),
+            Line::from(subtitle_spans),
         ]));
     }
+    app.received_click_targets = history_click_targets;
 
     if items.is_empty() {
         items.push(ListItem::new(Span::styled(
@@ -1918,11 +2004,11 @@ fn render_connection_panel(
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // modo + mouse
-            Constraint::Length(4), // input + botões
+            Constraint::Length(3), // input + botões
             Constraint::Length(3), // local
             Constraint::Length(3), // publico
             Constraint::Length(3), // status curto
-            Constraint::Length(4), // assistente
+            Constraint::Length(0), // assistente (removido)
         ])
         .split(area);
 
@@ -1933,7 +2019,7 @@ fn render_connection_panel(
             Constraint::Length(12),
             Constraint::Length(12),
             Constraint::Min(0),
-            Constraint::Length(18),
+            Constraint::Length(14),
         ])
         .split(rows[0]);
 
@@ -2029,9 +2115,9 @@ fn render_connection_panel(
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(20),
-            Constraint::Length(10),
-            Constraint::Length(14),
+            Constraint::Length(8),
             Constraint::Length(12),
+            Constraint::Length(8),
         ])
         .split(rows[1]);
 
@@ -2138,7 +2224,7 @@ fn render_connection_panel(
     // Linha 3: Local + copiar
     let row_mid = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(20), Constraint::Length(12)])
+        .constraints([Constraint::Min(20), Constraint::Length(9)])
         .split(rows[2]);
 
     let local_text = app
@@ -2180,7 +2266,7 @@ fn render_connection_panel(
     // Linha 4: Público + copiar
     let row_public = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(20), Constraint::Length(12)])
+        .constraints([Constraint::Min(20), Constraint::Length(9)])
         .split(rows[3]);
 
     let public_text = match (app.current_public_endpoint(), app.stun_status.as_deref()) {
@@ -2264,7 +2350,8 @@ fn render_connection_panel(
     );
 
     // Linha 6: assistente
-    let row_assist = rows[5];
+    if rows[5].height > 0 {
+        let row_assist = rows[5];
 
     let detected_v4 = app
         .local_ip
@@ -2303,6 +2390,7 @@ fn render_connection_panel(
             .style(Style::default().bg(theme.panel)),
         row_assist,
     );
+    }
 
     // Lista completa de botões “clicáveis”
     let buttons = vec![
@@ -2342,10 +2430,10 @@ fn render_small_ui_button(
 }
 
 // -------------------------------
-// Footer (ações de arquivos) — MAIS botões, sempre visíveis
+// Footer (acoes de transferencia) - so na aba Transferencias
 // -------------------------------
 
-fn render_footer_buttons(
+fn render_transfer_action_buttons(
     frame: &mut Frame,
     area: Rect,
     app: &AppState,
@@ -2354,10 +2442,10 @@ fn render_footer_buttons(
     let row = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(12),
-            Constraint::Length(12),
-            Constraint::Length(12),
             Constraint::Length(10),
+            Constraint::Length(8),
+            Constraint::Length(10),
+            Constraint::Length(6),
             Constraint::Min(0),
         ])
         .split(area);
@@ -2552,6 +2640,22 @@ fn truncate_keep_end(text: &str, max: usize) -> String {
         .rev()
         .collect::<String>();
     format!("...{tail}")
+}
+
+fn truncate_keep_start(text: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    if max <= 3 {
+        return text.chars().take(max).collect();
+    }
+
+    let head_len = max - 3;
+    let head = text.chars().take(head_len).collect::<String>();
+    format!("{head}...")
 }
 
 // -------------------------------

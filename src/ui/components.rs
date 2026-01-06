@@ -5,7 +5,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::net::NetCommand;
 
-use super::{AppState, IncomingStatus, open_path_in_default_app, reveal_path_in_file_manager};
+use super::{AppState, open_path_in_default_app, reveal_path_in_file_manager};
 
 #[derive(Clone, Copy)]
 pub enum ReceivedClickAction {
@@ -69,18 +69,12 @@ impl ClickTarget for ReceivedClickTarget {
     }
 
     fn on_click(&self, app: &mut AppState, _net_tx: &UnboundedSender<NetCommand>) {
-        if !matches!(
-            app.received
-                .iter()
-                .find(|entry| entry.path == self.path)
-                .map(|entry| entry.status),
-            Some(IncomingStatus::Done)
-        ) {
-            return;
-        }
-
         let action = self.action;
         let path = self.path.clone();
+        if !path.exists() {
+            app.push_log(format!("arquivo não encontrado {}", path.display()));
+            return;
+        }
         let result = match action {
             ReceivedClickAction::Open => open_path_in_default_app(&path),
             ReceivedClickAction::RevealInFolder => reveal_path_in_file_manager(&path),

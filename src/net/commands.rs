@@ -28,6 +28,7 @@ pub enum NetEvent {
     FileReceived {
         file_id: u64,
         path: PathBuf,
+        from: SocketAddr,
     },
     SessionDir(PathBuf),
     PeerConnecting(SocketAddr),
