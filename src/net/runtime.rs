@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::{
     collections::HashMap,
     io,
@@ -9,7 +10,7 @@ use std::{
 };
 
 use base64::Engine;
-use quinn::{Endpoint, EndpointConfig, RecvStream, ServerConfig};
+use quinn::{Endpoint, EndpointConfig, ServerConfig};
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc as tokio_mpsc;
@@ -24,7 +25,10 @@ use super::transfer::{
     send_message,
 };
 
-pub const CHUNK_SIZE: usize = 64 * 1024;
+pub const DEFAULT_CHUNK_SIZE: usize = 256 * 1024;
+const MIN_CHUNK_SIZE: usize = 16 * 1024;
+const MAX_CHUNK_SIZE: usize = 1024 * 1024;
+const MAX_CONCURRENT_UNI_STREAMS: u32 = 256;
 pub(crate) const PROTOCOL_VERSION: u8 = 3;
 pub(crate) const OBSERVED_ENDPOINT_VERSION: u8 = 2;
 pub(crate) const HEARTBEAT_VERSION: u8 = 3;
@@ -33,6 +37,18 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const MOBILITY_TIMER_PARK: Duration = Duration::from_secs(3600);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 const HEARTBEAT_MAX_MISSES: u32 = 3;
+
+static CHUNK_SIZE: OnceLock<usize> = OnceLock::new();
+
+pub(crate) fn transfer_chunk_size() -> usize {
+    *CHUNK_SIZE.get_or_init(|| {
+        std::env::var("HOLLOW_CHUNK_SIZE")
+            .ok()
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .map(|parsed| parsed.clamp(MIN_CHUNK_SIZE, MAX_CHUNK_SIZE))
+            .unwrap_or(DEFAULT_CHUNK_SIZE)
+    })
+}
 
 /// Inicia a thread de rede e retorna os canais de comunicação com a UI.
 pub fn start_network(
@@ -1001,11 +1017,15 @@ fn publish_stun_result(result: Result<Option<SocketAddr>, String>, evt_tx: &Send
 }
 
 fn log_transport_config(evt_tx: &Sender<NetEvent>) {
+    let chunk_size = transfer_chunk_size();
     let _ = evt_tx.send(NetEvent::Log(
         "transporte QUIC: streams confiaveis com TLS 1.3".to_string(),
     ));
     let _ = evt_tx.send(NetEvent::Log(format!(
-        "dados de arquivo: streams unidirecionais com chunks de {CHUNK_SIZE} bytes"
+        "dados de arquivo: streams unidirecionais com chunks de {chunk_size} bytes"
+    )));
+    let _ = evt_tx.send(NetEvent::Log(format!(
+        "limite de streams unidirecionais simultaneos: {MAX_CONCURRENT_UNI_STREAMS}"
     )));
 }
 
@@ -1071,6 +1091,7 @@ fn make_endpoint(
 fn make_transport_config(target_window: u64, autotune: &AutotuneConfig) -> quinn::TransportConfig {
     let mut transport = quinn::TransportConfig::default();
     transport.keep_alive_interval(Some(Duration::from_secs(5)));
+    transport.max_concurrent_uni_streams(quinn::VarInt::from_u32(MAX_CONCURRENT_UNI_STREAMS));
     if let Ok(timeout) = quinn::IdleTimeout::try_from(Duration::from_secs(60)) {
         transport.max_idle_timeout(Some(timeout));
     }
@@ -1104,7 +1125,7 @@ fn make_server_config(
     Ok(server_config)
 }
 
-fn make_client_config(mut transport: quinn::TransportConfig) -> quinn::ClientConfig {
+fn make_client_config(transport: quinn::TransportConfig) -> quinn::ClientConfig {
     use quinn::rustls::{self, DigitallySignedStruct, SignatureScheme, client::danger};
 
     #[derive(Debug)]
@@ -1161,7 +1182,6 @@ fn make_client_config(mut transport: quinn::TransportConfig) -> quinn::ClientCon
         quinn::crypto::rustls::QuicClientConfig::try_from(crypto).expect("quic client config");
 
     let mut client = quinn::ClientConfig::new(std::sync::Arc::new(crypto));
-    transport.max_concurrent_uni_streams(quinn::VarInt::from_u32(32));
     client.transport_config(std::sync::Arc::new(transport));
     client
 }

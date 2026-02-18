@@ -128,7 +128,7 @@ pub fn spawn_send_task(
             next_file_id,
             &evt_tx_clone,
             &mut cmd_rx,
-            crate::net::CHUNK_SIZE,
+            crate::net::transfer_chunk_size(),
         )
         .await
     });
