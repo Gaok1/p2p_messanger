@@ -33,6 +33,8 @@ pub fn parse_args() -> CliArgs {
     let mut store = profiles::ProfileStore::load().unwrap_or_default();
     process_profile_requests(&mut store, &mut options);
 
+    normalize_autotune_bounds(&mut options.autotune);
+
     CliArgs {
         bind_addr: options.bind_addr,
         peer_addr: options.peer_addr,
@@ -73,6 +75,9 @@ fn handle_argument(
         "--peer" => set_socket_addr(remaining.next(), |addr| options.peer_addr = Some(addr)),
         "--autotune-inflight" => set_autotune_flag(remaining.next(), options),
         "--autotune-gain" => set_autotune_gain(remaining.next(), options),
+        "--autotune-min-window" => set_autotune_value(remaining.next(), |window| {
+            options.autotune.min_window = window
+        }),
         "--autotune-max-window" => set_autotune_value(remaining.next(), |window| {
             options.autotune.max_window = window
         }),
@@ -113,6 +118,12 @@ fn set_autotune_gain(value: Option<String>, options: &mut CliOptions) {
         if let Ok(parsed) = raw.parse() {
             options.autotune.gain = parsed;
         }
+    }
+}
+
+fn normalize_autotune_bounds(config: &mut net::AutotuneConfig) {
+    if config.min_window > config.max_window {
+        std::mem::swap(&mut config.min_window, &mut config.max_window);
     }
 }
 

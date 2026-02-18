@@ -1268,7 +1268,7 @@ fn start_autotune_task(
                     }
 
                     if last_log.elapsed() >= Duration::from_secs(1) {
-                        let rate_mbps = snapshot.delivery_rate_max / 1_000_000.0;
+                        let rate_mbps = (snapshot.delivery_rate_max * 8.0) / 1_000_000.0;
                         let _ = evt_tx.send(NetEvent::Log(format!(
                             "autotune inflight: min_rtt={:.2?} srtt={:.2?} rate={:.2} Mbps bdp={} target={}",
                             snapshot.min_rtt,

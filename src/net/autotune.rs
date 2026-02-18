@@ -35,7 +35,7 @@ impl Default for AutotuneConfig {
         Self {
             enabled: true,
             gain: 1.5,
-            min_window: 256 * 1024,
+            min_window: 1024 * 1024,
             max_window: 256 * 1024 * 1024,
             sample_interval: Duration::from_millis(500),
             rate_decay: 0.9,
