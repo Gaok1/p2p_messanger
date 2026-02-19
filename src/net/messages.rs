@@ -24,6 +24,18 @@ pub enum WireMessage {
         file_id: u64,
         name: String,
         size: u64,
+        offset: u64,
+    },
+    ResumeQuery {
+        file_id: u64,
+        name: String,
+        size: u64,
+    },
+    ResumeAnswer {
+        file_id: u64,
+        offset: u64,
+        ok: bool,
+        reason: Option<String>,
     },
     FileChunk {
         file_id: u64,
@@ -49,6 +61,7 @@ pub enum InboundFrame {
         file_id: u64,
         name: String,
         size: u64,
+        offset: u64,
         from: SocketAddr,
         stream: RecvStream,
     },

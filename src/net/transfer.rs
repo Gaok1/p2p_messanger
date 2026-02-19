@@ -8,8 +8,8 @@ use std::{
 
 use quinn::{ReadError, RecvStream, VarInt};
 use tokio::{
-    fs::File,
-    io::{AsyncReadExt, AsyncWriteExt, BufWriter},
+    fs::{File, OpenOptions},
+    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufWriter},
     sync::mpsc as tokio_mpsc,
     task,
 };
@@ -95,13 +95,44 @@ pub(crate) async fn handle_incoming_message(
         WireMessage::Cancel { file_id } => {
             if let Some(entry) = incoming.remove(&file_id) {
                 entry.handle.abort();
-                let _ = tokio::fs::remove_file(&entry.path).await;
                 let _ = evt_tx.send(NetEvent::ReceiveCanceled {
                     file_id,
                     path: entry.path,
                 });
             }
         }
+        WireMessage::ResumeQuery {
+            file_id,
+            name,
+            size,
+        } => match query_resume_offset(session_dir, &name, size, evt_tx).await {
+            Ok(offset) => {
+                let _ = send_message(
+                    connection,
+                    &WireMessage::ResumeAnswer {
+                        file_id,
+                        offset,
+                        ok: true,
+                        reason: None,
+                    },
+                    evt_tx,
+                )
+                .await;
+            }
+            Err(err) => {
+                let _ = send_message(
+                    connection,
+                    &WireMessage::ResumeAnswer {
+                        file_id,
+                        offset: 0,
+                        ok: false,
+                        reason: Some(err.to_string()),
+                    },
+                    evt_tx,
+                )
+                .await;
+            }
+        },
         _ => {}
     }
 
@@ -112,6 +143,7 @@ pub(crate) async fn handle_incoming_stream(
     file_id: u64,
     name: String,
     size: u64,
+    offset: u64,
     from: SocketAddr,
     mut stream: RecvStream,
     session_dir: &mut Option<PathBuf>,
@@ -121,25 +153,45 @@ pub(crate) async fn handle_incoming_stream(
 ) -> io::Result<()> {
     let dir = ensure_session_dir(session_dir, evt_tx).await?;
     let safe_name = sanitize_file_name(&name);
-    let path = unique_download_path(&dir, &safe_name).await;
-    let file = File::create(&path).await?;
-    if size > 0 {
-        file.set_len(size).await?;
+    let (final_path, path) = resolve_incoming_paths(&dir, &safe_name).await;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .read(true)
+        .open(&path)
+        .await?;
+
+    let current_len = file.metadata().await?.len();
+    if current_len > offset {
+        file.set_len(offset).await?;
+    } else if current_len < offset {
+        let _ = evt_tx.send(NetEvent::ReceiveFailed {
+            file_id,
+            path: path.clone(),
+        });
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("offset remoto {offset} maior que parcial local {current_len}"),
+        ));
     }
+    file.seek(std::io::SeekFrom::Start(offset)).await?;
 
     let _ = evt_tx.send(NetEvent::ReceiveStarted {
         file_id,
         path: path.clone(),
         size,
     });
-    let _ = evt_tx.send(NetEvent::Log(format!("recebendo {}", path.display())));
+    let _ = evt_tx.send(NetEvent::Log(format!(
+        "recebendo {} (offset {offset})",
+        path.display()
+    )));
 
     let evt_tx = evt_tx.clone();
     let completion = completion_tx.clone();
     let task_path = path.clone();
     let handle = task::spawn(async move {
         let mut file = BufWriter::new(file);
-        let mut received = 0u64;
+        let mut received = offset;
         let mut reported = 0u64;
         let mut last_emit = std::time::Instant::now();
         let mut buffer = vec![0u8; TRANSFER_BUFFER_SIZE];
@@ -152,7 +204,10 @@ pub(crate) async fn handle_incoming_stream(
                 Ok(Some(n)) => {
                     if let Err(err) = file.write_all(&buffer[..n]).await {
                         let _ = evt_tx.send(NetEvent::Log(format!("erro ao gravar {err}")));
-                        let _ = tokio::fs::remove_file(&task_path).await;
+                        let _ = evt_tx.send(NetEvent::ReceiveFailed {
+                            file_id,
+                            path: task_path.clone(),
+                        });
                         let _ = completion.send(file_id);
                         return;
                     }
@@ -177,11 +232,20 @@ pub(crate) async fn handle_incoming_stream(
                         });
                     }
                     if received == size {
-                        let _ = evt_tx.send(NetEvent::FileReceived {
-                            file_id,
-                            path: task_path.clone(),
-                            from,
-                        });
+                        if let Err(err) = tokio::fs::rename(&task_path, &final_path).await {
+                            let _ = evt_tx
+                                .send(NetEvent::Log(format!("erro ao finalizar arquivo {err}")));
+                            let _ = evt_tx.send(NetEvent::ReceiveFailed {
+                                file_id,
+                                path: task_path.clone(),
+                            });
+                        } else {
+                            let _ = evt_tx.send(NetEvent::FileReceived {
+                                file_id,
+                                path: final_path.clone(),
+                                from,
+                            });
+                        }
                     } else {
                         let _ = evt_tx.send(NetEvent::Log(format!(
                             "tamanho divergente {received} bytes (esperado {size})"
@@ -194,13 +258,15 @@ pub(crate) async fn handle_incoming_stream(
                         file_id,
                         path: task_path.clone(),
                     });
-                    let _ = tokio::fs::remove_file(&task_path).await;
                     let _ = completion.send(file_id);
                     return;
                 }
                 Err(err) => {
                     let _ = evt_tx.send(NetEvent::Log(format!("erro na leitura do stream {err}")));
-                    let _ = tokio::fs::remove_file(&task_path).await;
+                    let _ = evt_tx.send(NetEvent::ReceiveFailed {
+                        file_id,
+                        path: task_path.clone(),
+                    });
                     let _ = completion.send(file_id);
                     return;
                 }
@@ -265,6 +331,37 @@ async fn unique_download_path(dir: &Path, file_name: &str) -> PathBuf {
     }
 
     candidate
+}
+
+async fn resolve_incoming_paths(dir: &Path, file_name: &str) -> (PathBuf, PathBuf) {
+    let final_path = unique_download_path(dir, file_name).await;
+    let mut part_name = final_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file.bin")
+        .to_string();
+    part_name.push_str(".part");
+    let part_path = final_path.with_file_name(part_name);
+    (final_path, part_path)
+}
+
+async fn query_resume_offset(
+    session_dir: &mut Option<PathBuf>,
+    name: &str,
+    size: u64,
+    evt_tx: &Sender<NetEvent>,
+) -> io::Result<u64> {
+    let dir = ensure_session_dir(session_dir, evt_tx).await?;
+    let safe_name = sanitize_file_name(name);
+    let (_final_path, part_path) = resolve_incoming_paths(&dir, &safe_name).await;
+
+    match tokio::fs::metadata(&part_path).await {
+        Ok(meta) => {
+            let current = meta.len();
+            Ok(current.min(size))
+        }
+        Err(_) => Ok(0),
+    }
 }
 
 /// Envia um pacote de controle confiável para o par.
@@ -379,6 +476,17 @@ pub(crate) async fn send_files(
         let file_id = next_file_id;
         next_file_id = next_file_id.wrapping_add(1);
 
+        let _ = send_message(
+            connection,
+            &WireMessage::ResumeQuery {
+                file_id,
+                name: name.clone(),
+                size,
+            },
+            evt_tx,
+        )
+        .await;
+
         let mut stream = match connection.open_uni().await {
             Ok(stream) => stream,
             Err(err) => {
@@ -393,6 +501,7 @@ pub(crate) async fn send_files(
                 file_id,
                 name,
                 size,
+                offset: 0,
             },
             evt_tx,
         )
