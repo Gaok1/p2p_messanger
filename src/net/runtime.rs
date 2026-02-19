@@ -811,7 +811,7 @@ async fn run_network_async(
                             let _ = evt_tx.send(NetEvent::Log("mensagem recebida sem conexao".to_string()));
                         }
                     }
-                    InboundFrame::FileStream { file_id, name, size, from, stream } => {
+                    InboundFrame::FileStream { file_id, name, size, offset, from, stream } => {
                         if connection.is_none() {
                             let _ = evt_tx.send(NetEvent::Log("stream recebido sem conexao".to_string()));
                             continue;
@@ -823,6 +823,7 @@ async fn run_network_async(
                             file_id,
                             name,
                             size,
+                            offset,
                             from,
                             stream,
                             &mut session_dir,
@@ -1453,11 +1454,13 @@ fn setup_connection_reader(
                             file_id,
                             name,
                             size,
+                            offset,
                         }) => {
                             let _ = inbound.send(InboundFrame::FileStream {
                                 file_id,
                                 name,
                                 size,
+                                offset,
                                 from: connection.remote_address(),
                                 stream,
                             });
@@ -1556,24 +1559,42 @@ mod tests {
                 file_id: 0,
                 name: "file.bin".to_string(),
                 size: 0,
+                offset: 0,
             }),
             3
+        );
+        assert_eq!(
+            tag(&WireMessage::ResumeQuery {
+                file_id: 0,
+                name: "file.bin".to_string(),
+                size: 0,
+            }),
+            4
+        );
+        assert_eq!(
+            tag(&WireMessage::ResumeAnswer {
+                file_id: 0,
+                offset: 0,
+                ok: true,
+                reason: None,
+            }),
+            5
         );
         assert_eq!(
             tag(&WireMessage::FileChunk {
                 file_id: 0,
                 data: Vec::new(),
             }),
-            4
+            6
         );
-        assert_eq!(tag(&WireMessage::FileDone { file_id: 0 }), 5);
+        assert_eq!(tag(&WireMessage::FileDone { file_id: 0 }), 7);
         assert_eq!(
             tag(&WireMessage::ObservedEndpoint {
                 addr: "127.0.0.1:1".parse().expect("addr"),
             }),
-            6
+            8
         );
-        assert_eq!(tag(&WireMessage::Ping { nonce: 0 }), 7);
-        assert_eq!(tag(&WireMessage::Pong { nonce: 0 }), 8);
+        assert_eq!(tag(&WireMessage::Ping { nonce: 0 }), 9);
+        assert_eq!(tag(&WireMessage::Pong { nonce: 0 }), 10);
     }
 }
