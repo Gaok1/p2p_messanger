@@ -9,10 +9,14 @@ use std::{
 use quinn::{ReadError, RecvStream, VarInt};
 use tokio::{
     fs::File,
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt, BufWriter},
     sync::mpsc as tokio_mpsc,
     task,
 };
+
+const TRANSFER_BUFFER_SIZE: usize = 256 * 1024;
+const PROGRESS_EMIT_BYTES: u64 = 1024 * 1024;
+const PROGRESS_EMIT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
 use super::{
     NetCommand, NetEvent, OBSERVED_ENDPOINT_VERSION, PROTOCOL_VERSION, WireMessage,
@@ -119,6 +123,9 @@ pub(crate) async fn handle_incoming_stream(
     let safe_name = sanitize_file_name(&name);
     let path = unique_download_path(&dir, &safe_name).await;
     let file = File::create(&path).await?;
+    if size > 0 {
+        file.set_len(size).await?;
+    }
 
     let _ = evt_tx.send(NetEvent::ReceiveStarted {
         file_id,
@@ -131,9 +138,11 @@ pub(crate) async fn handle_incoming_stream(
     let completion = completion_tx.clone();
     let task_path = path.clone();
     let handle = task::spawn(async move {
-        let mut file = file;
+        let mut file = BufWriter::new(file);
         let mut received = 0u64;
-        let mut buffer = vec![0u8; 64 * 1024];
+        let mut reported = 0u64;
+        let mut last_emit = std::time::Instant::now();
+        let mut buffer = vec![0u8; TRANSFER_BUFFER_SIZE];
 
         loop {
             match stream.read(&mut buffer).await {
@@ -148,13 +157,25 @@ pub(crate) async fn handle_incoming_stream(
                         return;
                     }
                     received += n as u64;
-                    let _ = evt_tx.send(NetEvent::ReceiveProgress {
-                        file_id,
-                        bytes_received: received,
-                        size,
-                    });
+                    if should_emit_progress(received, reported, last_emit) {
+                        reported = received;
+                        last_emit = std::time::Instant::now();
+                        let _ = evt_tx.send(NetEvent::ReceiveProgress {
+                            file_id,
+                            bytes_received: received,
+                            size,
+                        });
+                    }
                 }
                 Ok(None) => {
+                    let _ = file.flush().await;
+                    if received > reported {
+                        let _ = evt_tx.send(NetEvent::ReceiveProgress {
+                            file_id,
+                            bytes_received: received,
+                            size,
+                        });
+                    }
                     if received == size {
                         let _ = evt_tx.send(NetEvent::FileReceived {
                             file_id,
@@ -382,8 +403,10 @@ pub(crate) async fn send_files(
             size,
         });
 
-        let mut buffer = vec![0u8; chunk_size];
+        let mut buffer = vec![0u8; chunk_size.max(TRANSFER_BUFFER_SIZE)];
         let mut sent_bytes = 0u64;
+        let mut reported = 0u64;
+        let mut last_emit = std::time::Instant::now();
         let mut success = true;
         loop {
             let read = file.read(&mut buffer).await?;
@@ -397,11 +420,15 @@ pub(crate) async fn send_files(
                 break;
             }
             sent_bytes += read as u64;
-            let _ = evt_tx.send(NetEvent::SendProgress {
-                file_id,
-                bytes_sent: sent_bytes,
-                size,
-            });
+            if should_emit_progress(sent_bytes, reported, last_emit) {
+                reported = sent_bytes;
+                last_emit = std::time::Instant::now();
+                let _ = evt_tx.send(NetEvent::SendProgress {
+                    file_id,
+                    bytes_sent: sent_bytes,
+                    size,
+                });
+            }
 
             match handle_send_control(cmd_rx, &mut pending_cmds) {
                 SendOutcome::Canceled => {
@@ -433,6 +460,13 @@ pub(crate) async fn send_files(
         }
 
         if success {
+            if sent_bytes > reported {
+                let _ = evt_tx.send(NetEvent::SendProgress {
+                    file_id,
+                    bytes_sent: sent_bytes,
+                    size,
+                });
+            }
             let _ = stream.finish();
             let _ = evt_tx.send(NetEvent::FileSent {
                 file_id,
@@ -446,4 +480,9 @@ pub(crate) async fn send_files(
         next_file_id,
         pending_cmds,
     })
+}
+
+fn should_emit_progress(total: u64, reported: u64, last_emit: std::time::Instant) -> bool {
+    total.saturating_sub(reported) >= PROGRESS_EMIT_BYTES
+        || last_emit.elapsed() >= PROGRESS_EMIT_INTERVAL
 }
