@@ -6,7 +6,7 @@ mod ui;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = cli::parse_args();
     let (net_tx, net_rx, net_handle) =
-        net::start_network(args.bind_addr, args.peer_addr, args.autotune);
+        net::start_network(args.bind_addr, args.peer_addr, args.autotune, args.peer_key);
 
     let mut terminal = ui::setup_terminal()?;
     let mut app = ui::AppState::new(args.bind_addr, args.peer_addr, args.peer_label);

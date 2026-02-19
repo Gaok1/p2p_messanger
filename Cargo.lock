@@ -17,6 +17,7 @@ dependencies = [
  "ratatui",
  "rcgen",
  "rfd",
+ "ring",
  "serde",
  "serde_json",
  "stunclient",

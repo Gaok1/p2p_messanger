@@ -8,6 +8,14 @@ pub enum NetCommand {
     Rebind(SocketAddr),
     CancelTransfers,
     SendFiles(Vec<PathBuf>),
+    /// Mensagem interna: resposta de resume encaminhada para a tarefa de envio.
+    /// A UI nao deve gerar este comando.
+    InternalResumeAnswer {
+        file_id: u64,
+        offset: u64,
+        ok: bool,
+        reason: Option<String>,
+    },
     Shutdown,
 }
 

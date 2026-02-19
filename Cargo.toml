@@ -19,6 +19,7 @@ arboard = "3.4"
 stunclient = "0.4.2"
 base64 = "0.22"
 rcgen = "0.12"
+ring = "0.17"
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"

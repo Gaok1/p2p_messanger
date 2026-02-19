@@ -17,6 +17,8 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 use super::autotune::{AutotuneConfig, AutotuneState};
 use super::commands::{NetCommand, NetEvent};
+use super::identity::{Identity, default_app_dir, fingerprint_peer_id, verify_signature};
+use super::journal::{TransferDirection, TransferJournal};
 use super::messages::{InboundFrame, WireMessage, decode_payload, spawn_send_task};
 use super::mobility::{ConnSignal, ConnectAttempt, ConnectResult, MobilityConfig, ReconnectState};
 use super::stun;
@@ -24,6 +26,8 @@ use super::transfer::{
     IncomingTransfer, SendOutcome, SendResult, handle_incoming_message, handle_incoming_stream,
     send_message,
 };
+
+use ring::rand::{SecureRandom, SystemRandom};
 
 pub const DEFAULT_CHUNK_SIZE: usize = 256 * 1024;
 const MIN_CHUNK_SIZE: usize = 16 * 1024;
@@ -56,6 +60,7 @@ pub fn start_network(
     bind_addr: SocketAddr,
     peer_addr: Option<SocketAddr>,
     autotune: AutotuneConfig,
+    expected_peer_key: Option<String>,
 ) -> (
     tokio_mpsc::UnboundedSender<NetCommand>,
     Receiver<NetEvent>,
@@ -63,7 +68,16 @@ pub fn start_network(
 ) {
     let (cmd_tx, cmd_rx) = tokio_mpsc::unbounded_channel();
     let (evt_tx, evt_rx) = mpsc::channel();
-    let handle = thread::spawn(move || run_network(bind_addr, peer_addr, autotune, cmd_rx, evt_tx));
+    let handle = thread::spawn(move || {
+        run_network(
+            bind_addr,
+            peer_addr,
+            autotune,
+            expected_peer_key,
+            cmd_rx,
+            evt_tx,
+        )
+    });
     (cmd_tx, evt_rx, handle)
 }
 
@@ -71,12 +85,21 @@ fn run_network(
     bind_addr: SocketAddr,
     initial_peer: Option<SocketAddr>,
     autotune: AutotuneConfig,
+    expected_peer_key: Option<String>,
     cmd_rx: tokio_mpsc::UnboundedReceiver<NetCommand>,
     evt_tx: Sender<NetEvent>,
 ) {
     let runtime = Runtime::new().expect("runtime");
     runtime.block_on(async move {
-        if let Err(err) = run_network_async(bind_addr, initial_peer, autotune, cmd_rx, evt_tx).await
+        if let Err(err) = run_network_async(
+            bind_addr,
+            initial_peer,
+            autotune,
+            expected_peer_key,
+            cmd_rx,
+            evt_tx,
+        )
+        .await
         {
             eprintln!("net thread error: {err}");
         }
@@ -87,10 +110,43 @@ async fn run_network_async(
     mut bind_addr: SocketAddr,
     initial_peer: Option<SocketAddr>,
     autotune: AutotuneConfig,
+    expected_peer_key: Option<String>,
     mut cmd_rx: tokio_mpsc::UnboundedReceiver<NetCommand>,
     evt_tx: Sender<NetEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     log_transport_config(&evt_tx);
+
+    // Identidade persistente do peer local.
+    let app_dir = default_app_dir();
+    let identity = Identity::load_or_generate(&app_dir)?;
+    let _ = evt_tx.send(NetEvent::Log(format!(
+        "identidade local carregada: {} (pubkey b64={})",
+        identity.peer_id,
+        identity.public_key_b64()
+    )));
+
+    // Journal persistente de transferências para retomada pós-crash.
+    let journal_path = app_dir.join("transfers.json");
+    let journal = match TransferJournal::load(journal_path.clone()) {
+        Ok(j) => j,
+        Err(err) => {
+            let _ = evt_tx.send(NetEvent::Log(format!(
+                "erro ao carregar journal ({}): {err}; iniciando vazio",
+                journal_path.display()
+            )));
+            TransferJournal::empty(journal_path)
+        }
+    };
+    let journal = std::sync::Arc::new(Mutex::new(journal));
+
+    // Estado de autenticação por chave pública.
+    let rng = SystemRandom::new();
+    let mut local_challenge = [0u8; 32];
+    let mut sent_identity = false;
+    let mut peer_pubkey: Option<Vec<u8>> = None;
+    let mut peer_id: Option<String> = None;
+    let mut peer_verified = false;
+    let mut expected_peer_key = expected_peer_key;
 
     let mut pending_cmds: Vec<NetCommand> = Vec::new();
 
@@ -182,8 +238,10 @@ async fn run_network_async(
                             files.clone(),
                             &connection,
                             connected_peer,
+                            peer_id.clone(),
                             next_file_id,
                             &evt_tx,
+                            journal.clone(),
                         ) {
                             send_task = Some(task);
                             send_cmd_tx = Some(tx);
@@ -250,7 +308,15 @@ async fn run_network_async(
                         }
 
                         if let Some((task, tx)) =
-                            spawn_send_task(files.clone(), &connection, connected_peer, next_file_id, &evt_tx)
+                            spawn_send_task(
+                                files.clone(),
+                                &connection,
+                                connected_peer,
+                                peer_id.clone(),
+                                next_file_id,
+                                &evt_tx,
+                                journal.clone(),
+                            )
                         {
                             send_task = Some(task);
                             send_cmd_tx = Some(tx);
@@ -610,6 +676,15 @@ async fn run_network_async(
                         connected_peer = Some(new_conn.remote_address());
                         last_peer = Some(new_conn.remote_address());
                         connection = Some(new_conn.clone());
+
+                        // Reseta handshake de identidade para esta conexão.
+                        rng.fill(&mut local_challenge)
+                            .map_err(|_| io::Error::new(io::ErrorKind::Other, "rng"))?;
+                        sent_identity = false;
+                        peer_pubkey = None;
+                        peer_id = None;
+                        peer_verified = false;
+
                         let _ = send_message(
                             &new_conn,
                             &WireMessage::Hello {
@@ -618,6 +693,21 @@ async fn run_network_async(
                             &evt_tx,
                         )
                         .await;
+
+                        // Inicia handshake de identidade no nível da aplicação.
+                        let _ = send_message(
+                            &new_conn,
+                            &WireMessage::IdentityInit {
+                                version: PROTOCOL_VERSION,
+                                pubkey: identity.public_key.to_vec(),
+                                challenge: local_challenge,
+                                label: None,
+                            },
+                            &evt_tx,
+                        )
+                        .await;
+                        sent_identity = true;
+
                         let _ = evt_tx.send(NetEvent::PeerConnected(new_conn.remote_address()));
                     }
                     None => {
@@ -763,6 +853,14 @@ async fn run_network_async(
                                   tokio::time::Instant::now() + MOBILITY_TIMER_PARK
                               );
                               connection = Some(new_conn.clone());
+
+                              rng.fill(&mut local_challenge)
+                                  .map_err(|_| io::Error::new(io::ErrorKind::Other, "rng"))?;
+                              sent_identity = false;
+                              peer_pubkey = None;
+                              peer_id = None;
+                              peer_verified = false;
+
                               let _ = send_message(
                                   &new_conn,
                                   &WireMessage::Hello {
@@ -771,6 +869,20 @@ async fn run_network_async(
                                   &evt_tx,
                               )
                               .await;
+
+                              let _ = send_message(
+                                  &new_conn,
+                                  &WireMessage::IdentityInit {
+                                      version: PROTOCOL_VERSION,
+                                      pubkey: identity.public_key.to_vec(),
+                                      challenge: local_challenge,
+                                      label: None,
+                                  },
+                                  &evt_tx,
+                              )
+                              .await;
+                              sent_identity = true;
+
                               let _ = evt_tx.send(NetEvent::PeerConnected(new_conn.remote_address()));
                           }
                           Err(err) => {
@@ -784,6 +896,126 @@ async fn run_network_async(
                     InboundFrame::Control(message, from) => {
                         if let Some(conn) = connection.as_ref() {
                             match message {
+                                WireMessage::IdentityInit { version: _, pubkey, challenge, label } => {
+                                    // Recebemos a identidade do peer e um desafio que devemos assinar.
+                                    if pubkey.len() == 32 {
+                                        peer_pubkey = Some(pubkey.clone());
+                                        let mut pk_arr = [0u8; 32];
+                                        pk_arr.copy_from_slice(&pubkey);
+                                        let id = fingerprint_peer_id(&pk_arr);
+                                        if let Some(lbl) = label {
+                                            let _ = evt_tx.send(NetEvent::Log(format!(
+                                                "peer anunciou identidade {id} (label={lbl})"
+                                            )));
+                                        } else {
+                                            let _ = evt_tx.send(NetEvent::Log(format!(
+                                                "peer anunciou identidade {id}"
+                                            )));
+                                        }
+
+                                        // Se o usuário forneceu uma chave esperada, valide aqui.
+                                        if let Some(expected) = expected_peer_key.as_deref() {
+                                            if !expected_peer_matches(expected, &pubkey, &id) {
+                                                let _ = evt_tx.send(NetEvent::Log(format!(
+                                                    "identidade do peer nao bate com --peer-key (esperado={expected}, recebido={id}); encerrando"
+                                                )));
+                                                conn.close(0u32.into(), b"peer key mismatch");
+                                                connected_peer = None;
+                                                peer_id = None;
+                                                peer_pubkey = None;
+                                                peer_verified = false;
+                                                continue;
+                                            }
+                                        }
+
+                                        peer_id = Some(id);
+                                    } else {
+                                        let _ = evt_tx.send(NetEvent::Log(
+                                            "peer enviou pubkey invalida no IdentityInit".to_string(),
+                                        ));
+                                    }
+
+                                    // Responde assinando o desafio recebido.
+                                    let sig = identity.sign_challenge(&challenge);
+                                    let _ = send_message(
+                                        conn,
+                                        &WireMessage::IdentityAck {
+                                            pubkey: identity.public_key.to_vec(),
+                                            signature: sig,
+                                        },
+                                        &evt_tx,
+                                    )
+                                    .await;
+
+                                    // Se ainda não enviamos nosso IdentityInit (ex.: peer iniciou), envie.
+                                    if !sent_identity {
+                                        rng.fill(&mut local_challenge)
+                                            .map_err(|_| io::Error::new(io::ErrorKind::Other, "rng"))?;
+                                        let _ = send_message(
+                                            conn,
+                                            &WireMessage::IdentityInit {
+                                                version: PROTOCOL_VERSION,
+                                                pubkey: identity.public_key.to_vec(),
+                                                challenge: local_challenge,
+                                                label: None,
+                                            },
+                                            &evt_tx,
+                                        )
+                                        .await;
+                                        sent_identity = true;
+                                    }
+
+                                    continue;
+                                }
+                                WireMessage::IdentityAck { pubkey, signature } => {
+                                    // Verifica se o peer consegue assinar o nosso desafio.
+                                    if pubkey.len() != 32 {
+                                        let _ = evt_tx.send(NetEvent::Log(
+                                            "peer enviou pubkey invalida no IdentityAck".to_string(),
+                                        ));
+                                        continue;
+                                    }
+
+                                    if !verify_signature(&pubkey, &local_challenge, &signature) {
+                                        let _ = evt_tx.send(NetEvent::Log(
+                                            "falha ao verificar assinatura do peer (IdentityAck)".to_string(),
+                                        ));
+                                        conn.close(0u32.into(), b"identity verify failed");
+                                        connected_peer = None;
+                                        peer_id = None;
+                                        peer_pubkey = None;
+                                        peer_verified = false;
+                                        continue;
+                                    }
+
+                                    // Se ainda não tínhamos peer_id (porque ele não mandou IdentityInit ainda), derive daqui.
+                                    if peer_id.is_none() {
+                                        let mut pk_arr = [0u8; 32];
+                                        pk_arr.copy_from_slice(&pubkey);
+                                        peer_id = Some(fingerprint_peer_id(&pk_arr));
+                                    }
+
+                                    peer_verified = true;
+                                    if let Some(id) = peer_id.as_deref() {
+                                        let _ = evt_tx.send(NetEvent::Log(format!(
+                                            "peer verificado por chave: {id}"
+                                        )));
+
+                                        // Auto-retomada: se existirem envios pendentes para este peer, enfileira.
+                                        if send_task.is_none() {
+                                            let pending = journal.lock().await.pending_outgoing_for_peer(id);
+                                            if !pending.is_empty() {
+                                                let _ = evt_tx.send(NetEvent::Log(format!(
+                                                    "retomando {} transferencia(s) pendente(s) do journal",
+                                                    pending.len()
+                                                )));
+                                                pending_cmds.push(NetCommand::SendFiles(pending));
+                                            }
+                                        }
+                                    }
+
+                                    continue;
+                                }
                                 WireMessage::Hello { version } => {
                                     peer_protocol_version = Some(version);
                                     heartbeat_inflight = None;
@@ -857,6 +1089,28 @@ async fn run_network_async(
                                         last_peer = Some(from);
                                         let _ = evt_tx.send(NetEvent::PeerConnected(from));
                                     }
+                                    continue;
+                                }
+                                WireMessage::ResumeAnswer { file_id, offset, ok, reason } => {
+                                    // Encaminha a resposta de resume para a tarefa de envio, se existir.
+                                    if let Some(tx) = &send_cmd_tx {
+                                        let _ = tx.send(NetCommand::InternalResumeAnswer {
+                                            file_id,
+                                            offset,
+                                            ok,
+                                            reason,
+                                        });
+                                    }
+                                    // Conta como atividade (evita timeouts) e nao precisa passar por handle_incoming_message.
+                                    heartbeat_inflight = None;
+                                    heartbeat_misses = 0;
+                                    if peer_protocol_version.is_none() {
+                                        peer_protocol_version = Some(PROTOCOL_VERSION);
+                                    }
+                                    handshake_deadline = None;
+                                    handshake_sleep
+                                        .as_mut()
+                                        .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
                                     continue;
                                 }
                                 message => {
@@ -960,6 +1214,9 @@ async fn handle_command(
     autotune_state: &std::sync::Arc<Mutex<AutotuneState>>,
 ) -> io::Result<bool> {
     match cmd {
+        NetCommand::InternalResumeAnswer { .. } => {
+            // Comando interno encaminhado para tarefa de envio; nao deve ser processado aqui.
+        }
         NetCommand::ConnectPeer(addr) => {
             *last_peer = Some(addr);
             let family_mismatch = endpoint
@@ -1291,6 +1548,24 @@ fn apply_autotune_target(
         .expect("flow control window within QUIC varint bounds");
     connection.set_receive_window(flow_window);
     connection.set_send_window(clamped);
+}
+
+fn expected_peer_matches(expected: &str, peer_pubkey: &[u8], peer_id: &str) -> bool {
+    let expected_trim = expected.trim();
+
+    // Aceita tanto:
+    // - fingerprint hex (peer_id)
+    // - pubkey base64
+    if expected_trim.eq_ignore_ascii_case(peer_id) {
+        return true;
+    }
+
+    // base64 -> bytes
+    if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(expected_trim) {
+        return decoded == peer_pubkey;
+    }
+
+    false
 }
 
 fn start_liveness_task(

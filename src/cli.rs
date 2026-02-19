@@ -12,6 +12,7 @@ pub struct CliArgs {
     pub peer_addr: Option<SocketAddr>,
     pub autotune: net::AutotuneConfig,
     pub peer_label: Option<String>,
+    pub peer_key: Option<String>,
 }
 
 #[derive(Default)]
@@ -40,6 +41,7 @@ pub fn parse_args() -> CliArgs {
         peer_addr: options.peer_addr,
         autotune: options.autotune,
         peer_label: options.peer_label,
+        peer_key: options.peer_key,
     }
 }
 

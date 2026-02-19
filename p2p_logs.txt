@@ -698,3 +698,425 @@ endpoint publico [2804:d45:9a05:f400:5cae:75ab:115f:2ebd]:62868
 [INFO] reconfigurando bind para 0.0.0.0:64189
 [INFO] endpoint publico 152.237.164.251:61113
 [INFO] abrindo pasta C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\2025-12-29_11-48-55\2025-1-09-Decidibilidade.pdf
+[INFO] transporte QUIC: streams confiaveis com TLS 1.3
+[INFO] dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+[INFO] endpoint publico [2804:d45:9a05:f400:85a9:2b8c:b3ec:3de]:52451
+[INFO] transporte QUIC: streams confiaveis com TLS 1.3
+[INFO] dados de arquivo: streams unidirecionais com chunks de 65536 bytes
+[INFO] endpoint publico [2804:d45:9a05:f400:85a9:2b8c:b3ec:3de]:53756
+[INFO] copiado [2804:d45:9a05:f400:9b1:ff10:cb5c:d1ba]:53756
+[INFO] reconfigurando bind para 0.0.0.0:53756
+[INFO] endpoint publico 152.237.164.251:58330
+[INFO] copiado 152.237.164.251:58330
+[INFO] ip colado
+[INFO] conectando 191.5.86.213:53993
+[WARN] tempo esgotado ao conectar 191.5.86.213:53993 (verifique NAT/firewall)
+[WARN] tempo esgotado 191.5.86.213:53993
+[INFO] reconectando 191.5.86.213:53993 em 500ms
+[INFO] conectando 191.5.86.213:53993
+[WARN] tempo esgotado ao conectar 191.5.86.213:53993 (verifique NAT/firewall)
+[WARN] tempo esgotado 191.5.86.213:53993
+[INFO] reconectando 191.5.86.213:53993 em 1000ms
+[INFO] conectando 191.5.86.213:53993
+[INFO] ip colado
+[WARN] tempo esgotado ao conectar 191.5.86.213:53993 (verifique NAT/firewall)
+[WARN] tempo esgotado 191.5.86.213:53993
+[INFO] reconectando 191.5.86.213:53993 em 2000ms
+[INFO] conectando 191.5.86.213:53993
+[WARN] tempo esgotado ao conectar 191.5.86.213:53993 (verifique NAT/firewall)
+[WARN] tempo esgotado 191.5.86.213:53993
+[INFO] reconectando 191.5.86.213:53993 em 4000ms
+[INFO] conectado 191.5.86.213:53356
+[INFO] pasta de downloads C:\Users\gaok1\Documents\GitHub\p2p_messanger\received
+[INFO] autotune inflight: min_rtt=18.98ms srtt=18.98ms rate=0.07 Mbps bdp=158 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=18.37ms srtt=18.37ms rate=0.05 Mbps bdp=111 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=18.37ms srtt=18.37ms rate=0.04 Mbps bdp=81 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=17.86ms srtt=17.86ms rate=0.03 Mbps bdp=64 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=17.86ms srtt=23.04ms rate=93.58 Mbps bdp=204.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.64ms srtt=16.64ms rate=81.04 Mbps bdp=164.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.64ms srtt=17.36ms rate=70.29 Mbps bdp=142.8 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.64ms srtt=17.14ms rate=56.94 Mbps bdp=115.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.64ms srtt=17.74ms rate=41.51 Mbps bdp=84.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.64ms srtt=17.54ms rate=30.26 Mbps bdp=61.5 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.64ms srtt=17.37ms rate=22.06 Mbps bdp=44.8 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.64ms srtt=17.19ms rate=29.77 Mbps bdp=60.4 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.64ms srtt=17.80ms rate=32.69 Mbps bdp=66.4 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.64ms srtt=17.60ms rate=35.93 Mbps bdp=73.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.64ms srtt=17.70ms rate=40.72 Mbps bdp=82.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.36ms srtt=17.33ms rate=41.27 Mbps bdp=82.4 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.36ms srtt=17.32ms rate=61.61 Mbps bdp=123.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=17.31ms rate=53.90 Mbps bdp=106.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=16.65ms rate=55.84 Mbps bdp=110.5 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=17.22ms rate=51.98 Mbps bdp=102.8 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=17.48ms rate=37.90 Mbps bdp=75.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=16.85ms rate=44.63 Mbps bdp=88.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=17.48ms rate=49.53 Mbps bdp=98.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=17.57ms rate=36.10 Mbps bdp=71.4 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=17.16ms rate=51.71 Mbps bdp=102.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=17.44ms rate=37.72 Mbps bdp=74.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=17.09ms rate=42.27 Mbps bdp=83.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=17.25ms rate=30.81 Mbps bdp=61.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=16.35ms rate=41.54 Mbps bdp=82.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=16.51ms rate=42.79 Mbps bdp=84.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=17.17ms rate=64.84 Mbps bdp=128.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=18.41ms rate=94.68 Mbps bdp=187.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=17.34ms rate=92.76 Mbps bdp=183.5 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.21ms srtt=16.70ms rate=75.14 Mbps bdp=148.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=16.17ms srtt=17.40ms rate=64.46 Mbps bdp=127.2 KiB target=1.00 MiB
+[INFO] transporte QUIC: streams confiaveis com TLS 1.3
+[INFO] dados de arquivo: streams unidirecionais com chunks de 262144 bytes
+[INFO] limite de streams unidirecionais simultaneos: 256
+[INFO] endpoint publico [2804:d45:9a05:f400:24f9:d5d:5cf3:b3bd]:64639
+[INFO] reconfigurando bind para 0.0.0.0:64639
+[INFO] endpoint publico 152.237.164.251:60855
+[INFO] reconfigurando bind para [::]:64639
+[INFO] endpoint publico [2804:d45:9a05:f400:24f9:d5d:5cf3:b3bd]:64639
+[INFO] reconfigurando bind para 0.0.0.0:64639
+[INFO] endpoint publico 152.237.164.251:60855
+[INFO] copiado 192.168.100.80:64639
+[INFO] copiado 192.168.100.80:64639
+[INFO] copiado 192.168.100.80:64639
+[INFO] conectado 192.168.100.80:55022
+[INFO] pasta de downloads C:\Users\gaok1\Documents\GitHub\p2p_messanger\received
+[INFO] endpoint publico 192.168.100.80:64639
+[INFO] autotune inflight: min_rtt=1.44ms srtt=1.44ms rate=0.05 Mbps bdp=8 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=1.15ms srtt=1.15ms rate=0.03 Mbps bdp=4 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=1.15ms srtt=1.15ms rate=0.02 Mbps bdp=3 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=1.15ms srtt=1.25ms rate=0.02 Mbps bdp=2 B target=1.00 MiB
+[INFO] recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\wompms mods.rar.part (offset 0)
+[INFO] autotune inflight: min_rtt=225.47µs srtt=225.47µs rate=1.51 Mbps bdp=42 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=241.82µs rate=1.50 Mbps bdp=42 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=233.26µs rate=1.53 Mbps bdp=43 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=423.76µs rate=1.36 Mbps bdp=38 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=242.38µs rate=1.50 Mbps bdp=42 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=249.67µs rate=1.46 Mbps bdp=41 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=249.35µs rate=1.49 Mbps bdp=42 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=235.01µs rate=1.47 Mbps bdp=41 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=225.99µs rate=1.51 Mbps bdp=42 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=255.55µs rate=1.51 Mbps bdp=42 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=244.61µs rate=1.52 Mbps bdp=42 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=236.44µs rate=1.23 Mbps bdp=34 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=236.44µs rate=0.90 Mbps bdp=25 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=236.44µs rate=0.66 Mbps bdp=18 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=236.44µs rate=0.53 Mbps bdp=14 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=236.44µs rate=0.43 Mbps bdp=12 B target=1.00 MiB
+[INFO] heartbeat: sem resposta de 192.168.100.80:55022 (3x), desconectando
+[INFO] desconectado 192.168.100.80:55022
+[ERRO] erro na leitura do stream connection lost
+[INFO] falha ao receber C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\wompms mods.rar.part
+[INFO] conectando 192.168.100.80:55022
+[WARN] tempo esgotado ao conectar 192.168.100.80:55022 (verifique NAT/firewall)
+[WARN] tempo esgotado 192.168.100.80:55022
+[INFO] reconectando 192.168.100.80:55022 em 500ms
+[INFO] conectando 192.168.100.80:55022
+[INFO] ip colado
+[WARN] tempo esgotado ao conectar 192.168.100.80:55022 (verifique NAT/firewall)
+[WARN] tempo esgotado 192.168.100.80:55022
+[INFO] reconectando 192.168.100.80:55022 em 1000ms
+[INFO] conectando 192.168.100.80:55022
+[INFO] conectando 152.237.164.251:61434
+[INFO] conectado 152.237.164.251:61434
+[INFO] endpoint publico 152.237.164.251:60855
+[INFO] autotune inflight: min_rtt=225.47µs srtt=7.89ms rate=0.25 Mbps bdp=7 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=8.16ms rate=0.19 Mbps bdp=5 B target=1.00 MiB
+[WARN] tempo esgotado ao conectar 192.168.100.80:55022 (verifique NAT/firewall)
+[INFO] autotune inflight: min_rtt=225.47µs srtt=8.16ms rate=0.15 Mbps bdp=4 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=8.23ms rate=0.11 Mbps bdp=3 B target=1.00 MiB
+[INFO] recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\wompms mods.rar.part (offset 0)
+[INFO] autotune inflight: min_rtt=225.47µs srtt=17.93ms rate=1.19 Mbps bdp=33 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.64ms rate=0.95 Mbps bdp=26 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=6.67ms rate=1.28 Mbps bdp=36 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.68ms rate=1.18 Mbps bdp=33 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=6.36ms rate=1.09 Mbps bdp=30 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=6.49ms rate=1.15 Mbps bdp=32 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.66ms rate=1.15 Mbps bdp=32 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.58ms rate=0.96 Mbps bdp=27 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.86ms rate=1.13 Mbps bdp=31 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.13ms rate=1.04 Mbps bdp=29 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=7.55ms rate=1.31 Mbps bdp=36 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.75ms rate=1.19 Mbps bdp=33 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.05ms rate=1.14 Mbps bdp=32 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.44ms rate=1.15 Mbps bdp=32 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.38ms rate=0.99 Mbps bdp=27 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=7.02ms rate=1.31 Mbps bdp=36 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.51ms rate=1.04 Mbps bdp=29 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.53ms rate=1.13 Mbps bdp=31 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.50ms rate=0.97 Mbps bdp=27 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.30ms rate=1.03 Mbps bdp=28 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.89ms rate=1.13 Mbps bdp=31 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.38ms rate=1.13 Mbps bdp=31 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=7.23ms rate=1.15 Mbps bdp=32 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.79ms rate=1.00 Mbps bdp=28 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.29ms rate=1.05 Mbps bdp=29 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=6.89ms rate=1.29 Mbps bdp=36 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.35ms rate=0.97 Mbps bdp=27 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.81ms rate=1.12 Mbps bdp=31 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.83ms rate=0.91 Mbps bdp=25 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.51ms rate=0.98 Mbps bdp=27 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=225.47µs srtt=5.68ms rate=1.17 Mbps bdp=32 B target=1.00 MiB
+[INFO] conectando 152.237.164.251:61434
+[INFO] conectado 152.237.164.251:61434
+[INFO] conexao encerrada closed by peer: 0
+[INFO] conexao perdida 152.237.164.251:61434: closed by peer: 0
+[INFO] desconectado 152.237.164.251:61434
+[INFO] conectando 152.237.164.251:61434
+[INFO] conectado 152.237.164.251:61434
+[INFO] conexao encerrada closed by peer: 0
+[INFO] conexao perdida 152.237.164.251:61434: closed by peer: 0
+[INFO] desconectado 152.237.164.251:61434
+[INFO] conectando 152.237.164.251:61434
+[INFO] conectado 152.237.164.251:61434
+[INFO] conexao encerrada closed by peer: 0
+[INFO] conexao perdida 152.237.164.251:61434: closed by peer: 0
+[INFO] desconectado 152.237.164.251:61434
+[INFO] conectando 152.237.164.251:61434
+[INFO] conectado 152.237.164.251:61434
+[INFO] conexao encerrada closed by peer: 0
+[INFO] conexao perdida 152.237.164.251:61434: closed by peer: 0
+[INFO] desconectado 152.237.164.251:61434
+[INFO] conectando 152.237.164.251:61434
+[INFO] conectado 152.237.164.251:61434
+[INFO] conexao encerrada closed by peer: 0
+[INFO] conexao perdida 152.237.164.251:61434: closed by peer: 0
+[INFO] desconectado 152.237.164.251:61434
+[INFO] conectando 152.237.164.251:61434
+[INFO] conectado 152.237.164.251:61434
+[INFO] conexao encerrada closed by peer: 0
+[INFO] conexao perdida 152.237.164.251:61434: closed by peer: 0
+[INFO] desconectado 152.237.164.251:61434
+[INFO] conectando 152.237.164.251:61434
+[INFO] conectado 152.237.164.251:61434
+[INFO] conexao encerrada closed by peer: 0
+[INFO] conexao perdida 152.237.164.251:61434: closed by peer: 0
+[INFO] desconectado 152.237.164.251:61434
+[INFO] conectando 152.237.164.251:61434
+[INFO] conectado 152.237.164.251:61434
+[INFO] conexao perdida 152.237.164.251:61434: closed by peer: 0
+[INFO] desconectado 152.237.164.251:61434
+[INFO] conectando 152.237.164.251:61434
+[INFO] conectado 152.237.164.251:61434
+[INFO] conexao encerrada closed by peer: 0
+[INFO] conexao perdida 152.237.164.251:61434: closed by peer: 0
+[INFO] desconectado 152.237.164.251:61434
+[INFO] transporte QUIC: streams confiaveis com TLS 1.3
+[INFO] dados de arquivo: streams unidirecionais com chunks de 262144 bytes
+[INFO] limite de streams unidirecionais simultaneos: 256
+[INFO] endpoint publico [2804:d45:9a05:f400:24f9:d5d:5cf3:b3bd]:52628
+[INFO] reconfigurando bind para 0.0.0.0:52628
+[INFO] endpoint publico 152.237.164.251:59620
+[INFO] copiado 152.237.164.251:59620
+[INFO] conectado 152.237.164.251:57783
+[INFO] pasta de downloads C:\Users\gaok1\Documents\GitHub\p2p_messanger\received
+[INFO] autotune inflight: min_rtt=6.69ms srtt=6.69ms rate=0.06 Mbps bdp=52 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=6.46ms srtt=6.46ms rate=0.05 Mbps bdp=36 B target=1.00 MiB
+[INFO] recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\1_wompms mods.rar.part (offset 0)
+[INFO] autotune inflight: min_rtt=5.03ms srtt=5.38ms rate=0.73 Mbps bdp=458 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=5.03ms srtt=6.46ms rate=1.13 Mbps bdp=712 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=5.03ms srtt=5.85ms rate=1.06 Mbps bdp=665 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.50ms rate=1.00 Mbps bdp=592 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.77ms rate=0.95 Mbps bdp=558 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=6.01ms rate=1.07 Mbps bdp=629 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.98ms rate=1.17 Mbps bdp=691 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.25ms rate=1.12 Mbps bdp=658 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.03ms rate=1.11 Mbps bdp=653 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.31ms rate=1.01 Mbps bdp=594 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=7.62ms rate=1.27 Mbps bdp=750 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.48ms rate=0.99 Mbps bdp=586 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.03ms rate=0.99 Mbps bdp=582 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.84ms rate=1.19 Mbps bdp=700 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=7.05ms rate=1.29 Mbps bdp=761 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.91ms rate=1.16 Mbps bdp=685 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.06ms rate=0.94 Mbps bdp=555 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.72ms srtt=5.25ms rate=0.98 Mbps bdp=577 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.43ms rate=0.82 Mbps bdp=465 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.43ms rate=0.67 Mbps bdp=377 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.43ms rate=0.49 Mbps bdp=275 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.43ms rate=0.35 Mbps bdp=200 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.43ms rate=0.29 Mbps bdp=162 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.43ms rate=0.21 Mbps bdp=118 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.43ms rate=0.17 Mbps bdp=95 B target=1.00 MiB
+[INFO] heartbeat: sem resposta de 152.237.164.251:57783 (3x), desconectando
+[INFO] desconectado 152.237.164.251:57783
+[ERRO] erro na leitura do stream connection lost
+[INFO] falha ao receber C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\1_wompms mods.rar.part
+[INFO] conectando 152.237.164.251:57783
+[WARN] tempo esgotado ao conectar 152.237.164.251:57783 (verifique NAT/firewall)
+[WARN] tempo esgotado 152.237.164.251:57783
+[INFO] reconectando 152.237.164.251:57783 em 500ms
+[INFO] conectando 152.237.164.251:57783
+[INFO] copiado 152.237.164.251:59620
+[INFO] conexao recebida de 152.237.164.251:60098 (aguardando 152.237.164.251:57783), ignorando
+[INFO] conexao recebida de 152.237.164.251:60098 (aguardando 152.237.164.251:57783), ignorando
+[INFO] conexao recebida de 152.237.164.251:60098 (aguardando 152.237.164.251:57783), ignorando
+[INFO] conexao recebida de 152.237.164.251:60098 (aguardando 152.237.164.251:57783), ignorando
+[WARN] tempo esgotado ao conectar 152.237.164.251:57783 (verifique NAT/firewall)
+[WARN] tempo esgotado 152.237.164.251:57783
+[INFO] reconectando 152.237.164.251:57783 em 1000ms
+[INFO] conectado 152.237.164.251:60098
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.33ms rate=0.12 Mbps bdp=69 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.99ms rate=0.09 Mbps bdp=50 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.99ms rate=0.07 Mbps bdp=41 B target=1.00 MiB
+[INFO] recebendo C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\1_wompms mods.rar.part (offset 0)
+[INFO] autotune inflight: min_rtt=4.53ms srtt=17.71ms rate=1.21 Mbps bdp=684 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.04ms rate=0.94 Mbps bdp=533 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.14ms rate=1.12 Mbps bdp=632 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.74ms rate=1.12 Mbps bdp=636 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.52ms rate=1.27 Mbps bdp=718 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.48ms rate=1.08 Mbps bdp=609 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.50ms rate=0.91 Mbps bdp=515 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.20ms rate=1.10 Mbps bdp=622 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.37ms rate=1.02 Mbps bdp=575 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.17ms rate=1.06 Mbps bdp=600 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.70ms rate=1.21 Mbps bdp=684 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.44ms rate=1.30 Mbps bdp=736 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.66ms rate=1.13 Mbps bdp=640 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.63ms rate=1.04 Mbps bdp=586 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.56ms rate=1.10 Mbps bdp=625 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.40ms rate=1.09 Mbps bdp=617 B target=1.00 MiB
+[WARN] cancelamento solicitado
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.17ms rate=1.28 Mbps bdp=724 B target=1.00 MiB
+[WARN] recebimento cancelado C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\1_wompms mods.rar.part
+[WARN] recebimento cancelado C:\Users\gaok1\Documents\GitHub\p2p_messanger\received\1_wompms mods.rar.part
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.07ms rate=0.99 Mbps bdp=562 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.07ms rate=0.73 Mbps bdp=410 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.73ms rate=0.59 Mbps bdp=332 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=15.22ms rate=7.82 Mbps bdp=4.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.89ms rate=82.22 Mbps bdp=45.4 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=4.89ms rate=69.93 Mbps bdp=38.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.55ms rate=64.25 Mbps bdp=35.5 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.78ms rate=78.18 Mbps bdp=43.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.53ms rate=83.24 Mbps bdp=46.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.92ms rate=80.62 Mbps bdp=44.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.68ms rate=78.11 Mbps bdp=43.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.83ms rate=85.64 Mbps bdp=47.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.48ms rate=72.68 Mbps bdp=40.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=4.63ms rate=76.03 Mbps bdp=42.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.77ms rate=80.87 Mbps bdp=44.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.40ms rate=74.09 Mbps bdp=41.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=8.57ms rate=88.00 Mbps bdp=48.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.22ms rate=85.71 Mbps bdp=47.4 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.33ms rate=80.73 Mbps bdp=44.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.17ms rate=76.97 Mbps bdp=42.5 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=8.16ms rate=81.88 Mbps bdp=45.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.66ms rate=85.47 Mbps bdp=47.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.59ms rate=62.31 Mbps bdp=34.4 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.23ms rate=84.44 Mbps bdp=46.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.94ms rate=68.39 Mbps bdp=37.8 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.01ms rate=85.54 Mbps bdp=47.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.00ms rate=78.02 Mbps bdp=43.1 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.39ms rate=77.19 Mbps bdp=42.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.73ms rate=75.26 Mbps bdp=41.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.01ms rate=76.37 Mbps bdp=42.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.31ms rate=79.26 Mbps bdp=43.8 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.38ms rate=76.88 Mbps bdp=42.5 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.11ms rate=69.01 Mbps bdp=38.1 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.38ms rate=83.04 Mbps bdp=45.9 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.40ms rate=78.99 Mbps bdp=43.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.70ms rate=88.94 Mbps bdp=49.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.35ms rate=83.20 Mbps bdp=46.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=8.39ms rate=92.15 Mbps bdp=50.9 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=8.29ms rate=87.75 Mbps bdp=48.5 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.27ms rate=85.45 Mbps bdp=47.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.45ms rate=81.39 Mbps bdp=45.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.50ms rate=79.13 Mbps bdp=43.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.12ms rate=87.63 Mbps bdp=48.4 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.65ms rate=76.17 Mbps bdp=42.1 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.63ms rate=86.13 Mbps bdp=47.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.99ms rate=86.96 Mbps bdp=48.1 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.08ms rate=78.46 Mbps bdp=43.4 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.04ms rate=77.56 Mbps bdp=42.9 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=8.43ms rate=90.59 Mbps bdp=50.1 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.06ms rate=88.98 Mbps bdp=49.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.87ms rate=90.84 Mbps bdp=50.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.11ms rate=89.14 Mbps bdp=49.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.09ms rate=82.70 Mbps bdp=45.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.33ms rate=60.29 Mbps bdp=33.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.93ms rate=89.13 Mbps bdp=49.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.67ms rate=91.79 Mbps bdp=50.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.19ms rate=82.54 Mbps bdp=45.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.12ms rate=72.34 Mbps bdp=40.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.07ms rate=89.67 Mbps bdp=49.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.18ms rate=80.95 Mbps bdp=44.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.66ms rate=88.00 Mbps bdp=48.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=5.85ms rate=73.78 Mbps bdp=40.8 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.40ms rate=73.67 Mbps bdp=40.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.25ms rate=75.59 Mbps bdp=41.8 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.03ms rate=90.77 Mbps bdp=50.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.70ms rate=73.52 Mbps bdp=40.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.65ms rate=91.69 Mbps bdp=50.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.69ms rate=86.68 Mbps bdp=47.9 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=7.79ms rate=86.11 Mbps bdp=47.6 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.80ms rate=74.75 Mbps bdp=41.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=79.91 Mbps bdp=44.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=64.72 Mbps bdp=35.8 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=52.43 Mbps bdp=29.0 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=38.22 Mbps bdp=21.1 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=30.96 Mbps bdp=17.1 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=22.57 Mbps bdp=12.5 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=18.28 Mbps bdp=10.1 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=13.33 Mbps bdp=7.4 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=9.71 Mbps bdp=5.4 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=7.87 Mbps bdp=4.3 KiB target=1.00 MiB
+[INFO] copiado 152.237.164.251:59620
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=5.74 Mbps bdp=3.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=4.18 Mbps bdp=2.3 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=3.05 Mbps bdp=1.7 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=2.22 Mbps bdp=1.2 KiB target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=1.80 Mbps bdp=1018 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=1.31 Mbps bdp=742 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=1.06 Mbps bdp=601 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.77 Mbps bdp=438 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.63 Mbps bdp=355 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.46 Mbps bdp=259 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.33 Mbps bdp=188 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.27 Mbps bdp=152 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.22 Mbps bdp=123 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.16 Mbps bdp=90 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.13 Mbps bdp=73 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.09 Mbps bdp=53 B target=1.00 MiB
+[INFO] copiado 152.237.164.251:59620
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.08 Mbps bdp=43 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.06 Mbps bdp=31 B target=1.00 MiB
+[INFO] copiado 152.237.164.251:59620
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.04 Mbps bdp=22 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.03 Mbps bdp=18 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.02 Mbps bdp=13 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.02 Mbps bdp=10 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.01 Mbps bdp=8 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.01 Mbps bdp=6 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.01 Mbps bdp=4 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.01 Mbps bdp=3 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.01 Mbps bdp=3 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.00 Mbps bdp=2 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.00 Mbps bdp=1 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.00 Mbps bdp=1 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.00 Mbps bdp=1 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.00 Mbps bdp=0 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.00 Mbps bdp=0 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.00 Mbps bdp=0 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.00 Mbps bdp=0 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.00 Mbps bdp=0 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.00 Mbps bdp=0 B target=1.00 MiB
+[INFO] autotune inflight: min_rtt=4.53ms srtt=6.93ms rate=0.00 Mbps bdp=0 B target=1.00 MiB
+[ERRO] erro ao enviar connection lost
+[INFO] conexao encerrada timed out
+[ERRO] erro ao enviar connection lost
+[ERRO] erro ao enviar connection lost
+[INFO] conexao perdida 152.237.164.251:60098: timed out
+[INFO] desconectado 152.237.164.251:60098
+[INFO] copiado 152.237.164.251:59620
+[INFO] ip colado
+[INFO] transporte QUIC: streams confiaveis com TLS 1.3
+[INFO] dados de arquivo: streams unidirecionais com chunks de 262144 bytes
+[INFO] limite de streams unidirecionais simultaneos: 256
+[INFO] endpoint publico [2804:d45:9a05:f400:24f9:d5d:5cf3:b3bd]:64514
+[INFO] reconfigurando bind para 0.0.0.0:64514
+[INFO] endpoint publico 152.237.164.251:61232
+[INFO] transporte QUIC: streams confiaveis com TLS 1.3
+[INFO] dados de arquivo: streams unidirecionais com chunks de 262144 bytes
+[INFO] limite de streams unidirecionais simultaneos: 256
+[INFO] identidade local carregada: 9b00d31a63a39e5126187c4011074c82 (pubkey b64=6+Q1e6gkJH/Tw1WQR7Ecm2f0sthpa1xF3LNNcVJ9pKE=)
+[INFO] endpoint publico [2804:d45:9a05:f400:24f9:d5d:5cf3:b3bd]:58018
+[INFO] reconfigurando bind para 0.0.0.0:58018
+[INFO] endpoint publico 152.237.164.251:60764
+[INFO] mouse livre: selecione texto no terminal (pressione 'm' para voltar aos cliques)

@@ -1,5 +1,7 @@
 pub mod autotune;
 pub mod commands;
+pub mod identity;
+pub mod journal;
 pub mod messages;
 pub mod mobility;
 mod runtime;

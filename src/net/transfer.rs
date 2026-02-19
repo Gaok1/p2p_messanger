@@ -23,6 +23,10 @@ use super::{
     serialize_message,
 };
 
+use super::journal::{TransferDirection, TransferJournal};
+
+const RESUME_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Representa um arquivo que está chegando do par.
 pub(crate) struct IncomingTransfer {
     pub path: PathBuf,
@@ -414,23 +418,79 @@ pub(crate) fn handle_send_control(
                 pending_cmds.push(NetCommand::Rebind(addr));
                 return SendOutcome::Canceled;
             }
+            // Respostas de resume sao tratadas antes do envio iniciar. Se chegarem depois, podem ser ignoradas.
+            NetCommand::InternalResumeAnswer { .. } => {}
             other => pending_cmds.push(other),
         }
     }
     SendOutcome::Completed
 }
 
+async fn wait_for_resume_answer(
+    cmd_rx: &mut tokio_mpsc::UnboundedReceiver<NetCommand>,
+    pending_cmds: &mut Vec<NetCommand>,
+    cache: &mut HashMap<u64, (u64, bool, Option<String>)>,
+    file_id: u64,
+) -> Result<(u64, bool, Option<String>), SendOutcome> {
+    if let Some(entry) = cache.remove(&file_id) {
+        return Ok(entry);
+    }
+
+    let deadline = tokio::time::Instant::now() + RESUME_WAIT_TIMEOUT;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            // Timeout: segue com offset 0.
+            return Ok((0, false, Some("timeout aguardando ResumeAnswer".to_string())));
+        }
+
+        match tokio::time::timeout(remaining, cmd_rx.recv()).await {
+            Ok(Some(cmd)) => match cmd {
+                NetCommand::InternalResumeAnswer {
+                    file_id: got_id,
+                    offset,
+                    ok,
+                    reason,
+                } => {
+                    if got_id == file_id {
+                        return Ok((offset, ok, reason));
+                    }
+                    cache.insert(got_id, (offset, ok, reason));
+                }
+                NetCommand::CancelTransfers => return Err(SendOutcome::Canceled),
+                NetCommand::Shutdown => return Err(SendOutcome::Shutdown),
+                NetCommand::Rebind(addr) => {
+                    pending_cmds.push(NetCommand::Rebind(addr));
+                    return Err(SendOutcome::Canceled);
+                }
+                other => pending_cmds.push(other),
+            },
+            Ok(None) => {
+                // Canal fechado (tarefas encerrando). Trata como shutdown.
+                return Err(SendOutcome::Shutdown);
+            }
+            Err(_) => {
+                // Timeout dessa espera.
+                return Ok((0, false, Some("timeout aguardando ResumeAnswer".to_string())));
+            }
+        }
+    }
+}
+
 /// Envia os arquivos para o par conectado respeitando cancelamentos da UI.
 pub(crate) async fn send_files(
     connection: &quinn::Connection,
     _peer: SocketAddr,
+    peer_id: String,
     files: &[PathBuf],
     mut next_file_id: u64,
     evt_tx: &Sender<NetEvent>,
     cmd_rx: &mut tokio_mpsc::UnboundedReceiver<NetCommand>,
     chunk_size: usize,
+    journal: std::sync::Arc<tokio::sync::Mutex<TransferJournal>>,
 ) -> io::Result<SendResult> {
     let mut pending_cmds: Vec<NetCommand> = Vec::new();
+    let mut resume_cache: HashMap<u64, (u64, bool, Option<String>)> = HashMap::new();
     let _ = send_message(
         connection,
         &WireMessage::Hello {
@@ -481,6 +541,52 @@ pub(crate) async fn send_files(
         )
         .await;
 
+        let (resume_offset, resume_ok, resume_reason) = match wait_for_resume_answer(
+            cmd_rx,
+            &mut pending_cmds,
+            &mut resume_cache,
+            file_id,
+        )
+        .await
+        {
+            Ok((offset, ok, reason)) => (offset.min(size), ok, reason),
+            Err(outcome) => {
+                return Ok(SendResult {
+                    outcome,
+                    next_file_id,
+                    pending_cmds,
+                });
+            }
+        };
+
+        let offset = if resume_ok { resume_offset } else { 0 };
+        if offset > 0 {
+            let _ = evt_tx.send(NetEvent::Log(format!(
+                "retomando envio de {name} a partir do byte {offset} (file_id={file_id})"
+            )));
+        } else if let Some(reason) = resume_reason {
+            let _ = evt_tx.send(NetEvent::Log(format!(
+                "resume indisponivel para {name} (file_id={file_id}): {reason}; enviando do inicio"
+            )));
+        }
+
+        if offset > 0 {
+            // Posiciona o arquivo para reenviar somente a parte faltante.
+            file.seek(std::io::SeekFrom::Start(offset)).await?;
+        }
+
+        // Registra no journal (para retomada pós-crash).
+        {
+            let mut j = journal.lock().await;
+            j.upsert_progress(
+                &peer_id,
+                TransferDirection::Outgoing,
+                path,
+                size,
+                offset,
+            );
+        }
+
         let mut stream = match connection.open_uni().await {
             Ok(stream) => stream,
             Err(err) => {
@@ -495,7 +601,7 @@ pub(crate) async fn send_files(
                 file_id,
                 name,
                 size,
-                offset: 0,
+                offset,
             },
             evt_tx,
         )
@@ -507,8 +613,8 @@ pub(crate) async fn send_files(
         });
 
         let mut buffer = vec![0u8; chunk_size.max(TRANSFER_BUFFER_SIZE)];
-        let mut sent_bytes = 0u64;
-        let mut reported = 0u64;
+        let mut sent_bytes = offset;
+        let mut reported = offset;
         let mut last_emit = std::time::Instant::now();
         let mut success = true;
         loop {
@@ -523,6 +629,19 @@ pub(crate) async fn send_files(
                 break;
             }
             sent_bytes += read as u64;
+
+            // Atualiza journal de forma throttled (o próprio journal controla flush).
+            {
+                let mut j = journal.lock().await;
+                j.upsert_progress(
+                    &peer_id,
+                    TransferDirection::Outgoing,
+                    path,
+                    size,
+                    sent_bytes,
+                );
+            }
+
             if should_emit_progress(sent_bytes, reported, last_emit) {
                 reported = sent_bytes;
                 last_emit = std::time::Instant::now();
@@ -542,6 +661,12 @@ pub(crate) async fn send_files(
                         file_id,
                         path: path.clone(),
                     });
+
+                    {
+                        let mut j = journal.lock().await;
+                        j.remove(&peer_id, TransferDirection::Outgoing, path, size);
+                    }
+
                     return Ok(SendResult {
                         outcome: SendOutcome::Canceled,
                         next_file_id,
@@ -552,6 +677,19 @@ pub(crate) async fn send_files(
                     let _ = stream.reset(VarInt::from_u32(0));
                     let _ =
                         send_message(connection, &WireMessage::Cancel { file_id }, evt_tx).await;
+
+                    {
+                        let mut j = journal.lock().await;
+                        j.upsert_progress(
+                            &peer_id,
+                            TransferDirection::Outgoing,
+                            path,
+                            size,
+                            sent_bytes,
+                        );
+                        let _ = j.flush();
+                    }
+
                     return Ok(SendResult {
                         outcome: SendOutcome::Shutdown,
                         next_file_id,
@@ -575,6 +713,11 @@ pub(crate) async fn send_files(
                 file_id,
                 path: path.clone(),
             });
+
+            {
+                let mut j = journal.lock().await;
+                j.remove(&peer_id, TransferDirection::Outgoing, path, size);
+            }
         }
     }
 
