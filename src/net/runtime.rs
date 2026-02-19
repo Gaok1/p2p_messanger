@@ -37,6 +37,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const MOBILITY_TIMER_PARK: Duration = Duration::from_secs(3600);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 const HEARTBEAT_MAX_MISSES: u32 = 3;
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(3);
 
 static CHUNK_SIZE: OnceLock<usize> = OnceLock::new();
 
@@ -142,6 +143,9 @@ async fn run_network_async(
     let mut heartbeat_inflight: Option<u64> = None;
     let mut heartbeat_misses: u32 = 0;
     let mut heartbeat_nonce: u64 = 0;
+    let mut handshake_deadline: Option<tokio::time::Instant> = None;
+    let handshake_sleep = tokio::time::sleep(MOBILITY_TIMER_PARK);
+    tokio::pin!(handshake_sleep);
 
     let mobility = MobilityConfig::default();
     let (conn_signal_tx, mut conn_signal_rx) = tokio_mpsc::unbounded_channel::<ConnSignal>();
@@ -383,6 +387,10 @@ async fn run_network_async(
                         peer_protocol_version = None;
                         heartbeat_inflight = None;
                         heartbeat_misses = 0;
+                        handshake_deadline = None;
+                        handshake_sleep
+                            .as_mut()
+                            .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
 
                         let _ = evt_tx.send(NetEvent::Log(format!(
                             "conexao perdida {peer}: {error}"
@@ -436,7 +444,7 @@ async fn run_network_async(
                     }
                 }
             }
-            _ = heartbeat_tick.tick(), if connection.is_some() && peer_protocol_version.unwrap_or(0) >= HEARTBEAT_VERSION => {
+            _ = heartbeat_tick.tick(), if connection.is_some() => {
                 if heartbeat_inflight.is_some() {
                     heartbeat_misses = heartbeat_misses.saturating_add(1);
                     if heartbeat_misses >= HEARTBEAT_MAX_MISSES {
@@ -460,6 +468,10 @@ async fn run_network_async(
                             peer_protocol_version = None;
                             heartbeat_inflight = None;
                             heartbeat_misses = 0;
+                            handshake_deadline = None;
+                            handshake_sleep
+                                .as_mut()
+                                .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
                             let _ = evt_tx.send(NetEvent::Log(format!(
                                 "heartbeat: sem resposta de {peer} ({}x), desconectando",
                                 HEARTBEAT_MAX_MISSES
@@ -486,6 +498,47 @@ async fn run_network_async(
                 heartbeat_inflight = Some(nonce);
                 if let Some(conn) = connection.as_ref() {
                     let _ = send_message(conn, &WireMessage::Ping { nonce }, &evt_tx).await;
+                }
+            }
+            _ = &mut handshake_sleep, if handshake_deadline.is_some() => {
+                let Some(deadline) = handshake_deadline else {
+                    continue;
+                };
+                if tokio::time::Instant::now() < deadline {
+                    handshake_sleep.as_mut().reset(deadline);
+                    continue;
+                }
+
+                handshake_deadline = None;
+                handshake_sleep
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
+                if connection.is_some() && peer_protocol_version.is_none() {
+                    if let Some(conn) = connection.take() {
+                        let peer = conn.remote_address();
+                        conn.close(quinn::VarInt::from_u32(0), b"handshake timeout");
+                        connected_peer = None;
+                        connect_attempt = None;
+                        if let Some(task) = reader_task.take() {
+                            task.abort();
+                        }
+                        if let Some(task) = metrics_task.take() {
+                            task.abort();
+                        }
+                        if let Some(task) = liveness_task.take() {
+                            task.abort();
+                        }
+                        if let Some(task) = observe_task.take() {
+                            task.abort();
+                        }
+                        heartbeat_inflight = None;
+                        heartbeat_misses = 0;
+                        let _ = evt_tx.send(NetEvent::Log(format!(
+                            "handshake: sem Hello de {peer} em {:?}, desconectando",
+                            HANDSHAKE_TIMEOUT
+                        )));
+                        let _ = evt_tx.send(NetEvent::PeerDisconnected(peer));
+                    }
                 }
             }
             _ = &mut reconnect_sleep, if reconnect_deadline.is_some() => {
@@ -530,6 +583,10 @@ async fn run_network_async(
                         peer_protocol_version = None;
                         heartbeat_inflight = None;
                         heartbeat_misses = 0;
+                        handshake_deadline = Some(tokio::time::Instant::now() + HANDSHAKE_TIMEOUT);
+                        if let Some(deadline) = handshake_deadline {
+                            handshake_sleep.as_mut().reset(deadline);
+                        }
                         setup_connection_reader(
                             new_conn.clone(),
                             &mut inbound_tx,
@@ -676,6 +733,10 @@ async fn run_network_async(
                               peer_protocol_version = None;
                               heartbeat_inflight = None;
                               heartbeat_misses = 0;
+                              handshake_deadline = Some(tokio::time::Instant::now() + HANDSHAKE_TIMEOUT);
+                              if let Some(deadline) = handshake_deadline {
+                                  handshake_sleep.as_mut().reset(deadline);
+                              }
                               connected_peer = Some(new_conn.remote_address());
                               last_peer = Some(new_conn.remote_address());
                               setup_connection_reader(
@@ -727,6 +788,10 @@ async fn run_network_async(
                                     peer_protocol_version = Some(version);
                                     heartbeat_inflight = None;
                                     heartbeat_misses = 0;
+                                    handshake_deadline = None;
+                                    handshake_sleep
+                                        .as_mut()
+                                        .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
                                     if version >= OBSERVED_ENDPOINT_VERSION
                                         && mobility.enabled
                                         && observe_task.is_none()
@@ -760,6 +825,10 @@ async fn run_network_async(
                                     }
                                     heartbeat_inflight = None;
                                     heartbeat_misses = 0;
+                                    handshake_deadline = None;
+                                    handshake_sleep
+                                        .as_mut()
+                                        .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
                                     let _ = send_message(
                                         conn,
                                         &WireMessage::Pong { nonce },
@@ -779,6 +848,10 @@ async fn run_network_async(
                                     }
                                     heartbeat_inflight = None;
                                     heartbeat_misses = 0;
+                                    handshake_deadline = None;
+                                    handshake_sleep
+                                        .as_mut()
+                                        .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
                                     if connected_peer.is_none() {
                                         connected_peer = Some(from);
                                         last_peer = Some(from);
@@ -789,6 +862,13 @@ async fn run_network_async(
                                 message => {
                                     heartbeat_inflight = None;
                                     heartbeat_misses = 0;
+                                    if peer_protocol_version.is_none() {
+                                        peer_protocol_version = Some(PROTOCOL_VERSION);
+                                    }
+                                    handshake_deadline = None;
+                                    handshake_sleep
+                                        .as_mut()
+                                        .reset(tokio::time::Instant::now() + MOBILITY_TIMER_PARK);
                                     let new_peer = handle_incoming_message(
                                         conn,
                                         message,

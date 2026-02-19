@@ -105,7 +105,7 @@ pub(crate) async fn handle_incoming_message(
             file_id,
             name,
             size,
-        } => match query_resume_offset(session_dir, &name, size, evt_tx).await {
+        } => match query_resume_offset(session_dir, file_id, &name, size, evt_tx).await {
             Ok(offset) => {
                 let _ = send_message(
                     connection,
@@ -153,7 +153,7 @@ pub(crate) async fn handle_incoming_stream(
 ) -> io::Result<()> {
     let dir = ensure_session_dir(session_dir, evt_tx).await?;
     let safe_name = sanitize_file_name(&name);
-    let (final_path, path) = resolve_incoming_paths(&dir, &safe_name).await;
+    let path = incoming_part_path(&dir, file_id, &safe_name);
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -232,6 +232,7 @@ pub(crate) async fn handle_incoming_stream(
                         });
                     }
                     if received == size {
+                        let final_path = unique_download_path(&dir, &safe_name).await;
                         if let Err(err) = tokio::fs::rename(&task_path, &final_path).await {
                             let _ = evt_tx
                                 .send(NetEvent::Log(format!("erro ao finalizar arquivo {err}")));
@@ -333,27 +334,20 @@ async fn unique_download_path(dir: &Path, file_name: &str) -> PathBuf {
     candidate
 }
 
-async fn resolve_incoming_paths(dir: &Path, file_name: &str) -> (PathBuf, PathBuf) {
-    let final_path = unique_download_path(dir, file_name).await;
-    let mut part_name = final_path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("file.bin")
-        .to_string();
-    part_name.push_str(".part");
-    let part_path = final_path.with_file_name(part_name);
-    (final_path, part_path)
+fn incoming_part_path(dir: &Path, file_id: u64, file_name: &str) -> PathBuf {
+    dir.join(format!("{file_id}_{file_name}.part"))
 }
 
 async fn query_resume_offset(
     session_dir: &mut Option<PathBuf>,
+    file_id: u64,
     name: &str,
     size: u64,
     evt_tx: &Sender<NetEvent>,
 ) -> io::Result<u64> {
     let dir = ensure_session_dir(session_dir, evt_tx).await?;
     let safe_name = sanitize_file_name(name);
-    let (_final_path, part_path) = resolve_incoming_paths(&dir, &safe_name).await;
+    let part_path = incoming_part_path(&dir, file_id, &safe_name);
 
     match tokio::fs::metadata(&part_path).await {
         Ok(meta) => {
